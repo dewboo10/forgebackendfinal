@@ -1,0 +1,83 @@
+// src/index.js — Main server
+import Fastify from 'fastify'
+import cors from '@fastify/cors'
+import rateLimit from '@fastify/rate-limit'
+import 'dotenv/config'
+
+import { redis } from './db/index.js'
+import { scheduleJobs } from './jobs/index.js'
+
+import fastifyStatic from '@fastify/static'
+import { fileURLToPath } from 'url'
+import path from 'path'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+import authRoutes    from './routes/auth.js'
+import miningRoutes  from './routes/mining.js'
+import storeRoutes   from './routes/store.js'
+import socialRoutes  from './routes/social.js'
+import adminRoutes   from './routes/admin.js'
+
+const app = Fastify({
+  logger: process.env.NODE_ENV !== 'production',
+  trustProxy: true,
+})
+
+// ─── CORS ─────────────────────────────────────────────────────────────────────
+await app.register(cors, {
+  origin: [
+    process.env.FRONTEND_URL,
+    'https://web.telegram.org',
+    /\.telegram\.org$/,
+  ],
+  methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Telegram-Init-Data'],
+})
+
+// ─── RATE LIMITING ────────────────────────────────────────────────────────────
+await app.register(rateLimit, {
+  global: true,
+  max: 120,           // 120 req/min per IP — enough for normal use
+  timeWindow: 60000,
+  redis,
+  keyGenerator: (req) => req.headers['x-telegram-init-data']?.slice(0, 40) || req.ip,
+  errorResponseBuilder: () => ({ error: 'Too many requests', retryAfter: 60 }),
+})
+
+// ─── HEALTH CHECK ─────────────────────────────────────────────────────────────
+app.get('/health', async () => ({ ok: true, ts: Date.now() }))
+
+// ─── ADMIN PANEL (static) ─────────────────────────────────────────────────────
+await app.register(fastifyStatic, {
+  root: path.join(__dirname, '../admin'),
+  prefix: '/admin',
+})
+
+// ─── ROUTES ───────────────────────────────────────────────────────────────────
+await app.register(authRoutes)
+await app.register(miningRoutes)
+await app.register(storeRoutes)
+await app.register(socialRoutes)
+await app.register(adminRoutes)
+
+// ─── GLOBAL ERROR HANDLER ─────────────────────────────────────────────────────
+app.setErrorHandler((err, req, reply) => {
+  console.error('Unhandled error:', err)
+  if (err.statusCode === 429) return reply.code(429).send({ error: 'Too many requests' })
+  reply.code(500).send({ error: 'Internal server error' })
+})
+
+// ─── START ────────────────────────────────────────────────────────────────────
+const start = async () => {
+  try {
+    await app.listen({ port: parseInt(process.env.PORT || '3001'), host: '0.0.0.0' })
+    console.log(`🚀 Forge backend running on port ${process.env.PORT || 3001}`)
+    await scheduleJobs()
+  } catch (err) {
+    console.error('Startup error:', err)
+    process.exit(1)
+  }
+}
+
+start()

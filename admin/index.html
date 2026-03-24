@@ -1,0 +1,1010 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Forge Admin</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0 }
+  :root {
+    --bg:     #0a0a0a;
+    --bg2:    #111111;
+    --bg3:    #181818;
+    --bg4:    #202020;
+    --br:     rgba(255,255,255,.07);
+    --br2:    rgba(255,255,255,.12);
+    --tx:     #f0f0f0;
+    --tx2:    rgba(255,255,255,.5);
+    --tx3:    rgba(255,255,255,.25);
+    --green:  #00c37b;
+    --red:    #ff4d4d;
+    --yellow: #f5a623;
+    --blue:   #4a9eff;
+    --purple: #b364f0;
+  }
+  html, body { height: 100%; background: var(--bg); color: var(--tx); font-family: 'SF Mono', 'Fira Code', monospace; font-size: 13px; }
+  a { color: inherit; text-decoration: none; }
+
+  /* Layout */
+  #app { display: flex; height: 100vh; }
+  #sidebar {
+    width: 220px; flex-shrink: 0; background: var(--bg2);
+    border-right: 1px solid var(--br); display: flex; flex-direction: column;
+    overflow-y: auto;
+  }
+  #main { flex: 1; overflow-y: auto; display: flex; flex-direction: column; }
+  #topbar {
+    height: 52px; flex-shrink: 0; padding: 0 24px;
+    border-bottom: 1px solid var(--br); display: flex; align-items: center;
+    justify-content: space-between; background: var(--bg2); position: sticky; top: 0; z-index: 10;
+  }
+  #content { padding: 24px; flex: 1; }
+
+  /* Sidebar */
+  .sb-logo { padding: 18px 16px 12px; font-size: 15px; font-weight: 700; color: var(--green); letter-spacing: -.01em; border-bottom: 1px solid var(--br); }
+  .sb-section { padding: 10px 8px 4px; font-size: 9px; letter-spacing: .12em; color: var(--tx3); text-transform: uppercase; font-weight: 700; }
+  .sb-link {
+    display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 8px;
+    margin: 1px 8px; cursor: pointer; color: var(--tx2); transition: all .15s; font-size: 12px;
+  }
+  .sb-link:hover { background: var(--bg3); color: var(--tx); }
+  .sb-link.active { background: rgba(0,195,123,.1); color: var(--green); }
+  .sb-link .icon { width: 16px; text-align: center; opacity: .7; }
+  .sb-footer { margin-top: auto; padding: 12px; border-top: 1px solid var(--br); font-size: 10px; color: var(--tx3); }
+
+  /* Page sections */
+  .page { display: none; }
+  .page.active { display: block; }
+  .page-title { font-size: 18px; font-weight: 700; margin-bottom: 4px; color: var(--tx); }
+  .page-sub { font-size: 11px; color: var(--tx3); margin-bottom: 24px; }
+
+  /* Cards */
+  .card { background: var(--bg2); border: 1px solid var(--br); border-radius: 12px; padding: 16px; }
+  .card-title { font-size: 10px; letter-spacing: .1em; color: var(--tx3); text-transform: uppercase; font-weight: 700; margin-bottom: 12px; }
+
+  /* Stats grid */
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; margin-bottom: 24px; }
+  .stat-card { background: var(--bg2); border: 1px solid var(--br); border-radius: 12px; padding: 16px; }
+  .stat-val { font-size: 24px; font-weight: 700; color: var(--tx); line-height: 1; margin-bottom: 4px; }
+  .stat-lbl { font-size: 10px; color: var(--tx3); letter-spacing: .06em; text-transform: uppercase; }
+  .stat-card.green .stat-val { color: var(--green); }
+  .stat-card.red .stat-val { color: var(--red); }
+  .stat-card.blue .stat-val { color: var(--blue); }
+  .stat-card.yellow .stat-val { color: var(--yellow); }
+
+  /* Grid layouts */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+
+  /* Table */
+  .tbl-wrap { overflow-x: auto; border-radius: 12px; border: 1px solid var(--br); }
+  table { width: 100%; border-collapse: collapse; }
+  thead th { background: var(--bg3); padding: 10px 14px; text-align: left; font-size: 9px; letter-spacing: .1em; color: var(--tx3); text-transform: uppercase; font-weight: 700; white-space: nowrap; }
+  tbody tr { border-top: 1px solid var(--br); transition: background .1s; }
+  tbody tr:hover { background: var(--bg3); }
+  tbody td { padding: 10px 14px; font-size: 12px; color: var(--tx2); white-space: nowrap; }
+  tbody td.bold { color: var(--tx); font-weight: 600; }
+  .td-green { color: var(--green) !important; }
+  .td-red { color: var(--red) !important; }
+  .td-yellow { color: var(--yellow) !important; }
+
+  /* Badge */
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 100px; font-size: 9px; font-weight: 700; letter-spacing: .05em; }
+  .badge-green  { background: rgba(0,195,123,.1);  color: var(--green); }
+  .badge-red    { background: rgba(255,77,77,.1);   color: var(--red); }
+  .badge-yellow { background: rgba(245,166,35,.1);  color: var(--yellow); }
+  .badge-blue   { background: rgba(74,158,255,.1);  color: var(--blue); }
+  .badge-purple { background: rgba(179,100,240,.1); color: var(--purple); }
+
+  /* Buttons */
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 8px; border: none; cursor: pointer; font-size: 12px; font-weight: 600; transition: all .15s; }
+  .btn-primary { background: var(--green); color: #000; }
+  .btn-primary:hover { opacity: .88; }
+  .btn-ghost { background: transparent; color: var(--tx2); border: 1px solid var(--br); }
+  .btn-ghost:hover { background: var(--bg3); color: var(--tx); }
+  .btn-danger { background: rgba(255,77,77,.1); color: var(--red); border: 1px solid rgba(255,77,77,.2); }
+  .btn-danger:hover { background: rgba(255,77,77,.18); }
+  .btn-sm { padding: 5px 10px; font-size: 11px; }
+
+  /* Form */
+  .form-row { display: flex; flex-direction: column; gap: 4px; margin-bottom: 14px; }
+  .form-row label { font-size: 10px; letter-spacing: .08em; color: var(--tx3); text-transform: uppercase; font-weight: 700; }
+  input, select, textarea {
+    background: var(--bg3); border: 1px solid var(--br2); border-radius: 8px;
+    padding: 9px 12px; color: var(--tx); font-size: 13px; font-family: inherit; width: 100%;
+    outline: none; transition: border-color .15s;
+  }
+  input:focus, select:focus, textarea:focus { border-color: var(--green); }
+  textarea { resize: vertical; min-height: 80px; }
+  .form-inline { display: flex; gap: 10px; align-items: flex-end; }
+  .form-inline .form-row { flex: 1; margin-bottom: 0; }
+
+  /* Toggle */
+  .toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--br); }
+  .toggle-row:last-child { border-bottom: none; }
+  .toggle-info .tl { font-size: 13px; color: var(--tx); font-weight: 500; margin-bottom: 2px; }
+  .toggle-info .ts { font-size: 11px; color: var(--tx3); }
+  .toggle { width: 40px; height: 22px; background: var(--bg4); border-radius: 11px; position: relative; cursor: pointer; transition: background .2s; border: none; flex-shrink: 0; }
+  .toggle.on { background: var(--green); }
+  .toggle::after { content: ''; position: absolute; width: 16px; height: 16px; background: #fff; border-radius: 50%; top: 3px; left: 3px; transition: left .2s; }
+  .toggle.on::after { left: 21px; }
+
+  /* Search bar */
+  .search-bar { display: flex; gap: 10px; margin-bottom: 16px; }
+  .search-bar input { max-width: 280px; }
+
+  /* Pagination */
+  .pagination { display: flex; align-items: center; gap: 8px; padding: 12px 0; }
+  .pagination span { font-size: 11px; color: var(--tx3); }
+
+  /* Modal */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.75); z-index: 9999; display: flex; align-items: center; justify-content: center; padding: 20px; }
+  .modal { background: var(--bg2); border: 1px solid var(--br2); border-radius: 16px; width: 100%; max-width: 500px; max-height: 90vh; overflow-y: auto; }
+  .modal-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--br); }
+  .modal-header h3 { font-size: 14px; font-weight: 700; }
+  .modal-body { padding: 20px; }
+  .modal-footer { padding: 14px 20px; border-top: 1px solid var(--br); display: flex; gap: 8px; justify-content: flex-end; }
+  .modal-close { background: none; border: none; color: var(--tx3); cursor: pointer; font-size: 18px; line-height: 1; }
+
+  /* Toast */
+  #toast { position: fixed; bottom: 24px; right: 24px; z-index: 99999; display: flex; flex-direction: column; gap: 8px; }
+  .toast-item { background: var(--bg3); border: 1px solid var(--br2); border-radius: 10px; padding: 12px 16px; font-size: 12px; color: var(--tx); animation: tslide .25s ease; max-width: 300px; }
+  .toast-item.success { border-color: rgba(0,195,123,.3); }
+  .toast-item.error { border-color: rgba(255,77,77,.3); color: var(--red); }
+  @keyframes tslide { from { opacity:0; transform: translateX(20px) } to { opacity:1; transform: none } }
+
+  /* Chart placeholder */
+  .chart-wrap { height: 180px; display: flex; align-items: flex-end; gap: 4px; padding: 8px 0 0; }
+  .chart-bar { flex: 1; background: rgba(0,195,123,.25); border-radius: 4px 4px 0 0; min-height: 4px; transition: height .3s; position: relative; }
+  .chart-bar:hover { background: rgba(0,195,123,.45); }
+  .chart-bar::after { content: attr(data-v); position: absolute; top: -18px; left: 50%; transform: translateX(-50%); font-size: 9px; color: var(--tx3); white-space: nowrap; opacity: 0; }
+  .chart-bar:hover::after { opacity: 1; }
+
+  /* Config table */
+  .cfg-row { display: grid; grid-template-columns: 200px 1fr auto; gap: 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--br); }
+  .cfg-row:last-child { border-bottom: none; }
+  .cfg-key { font-size: 11px; color: var(--tx3); font-family: monospace; }
+  .cfg-val input { padding: 6px 10px; font-size: 12px; }
+
+  /* Halving epochs editor */
+  .epoch-row { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .epoch-row input { padding: 7px 10px; font-size: 12px; }
+
+  /* User detail */
+  .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+  .detail-item .dl { font-size: 10px; color: var(--tx3); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 3px; font-weight: 700; }
+  .detail-item .dv { font-size: 13px; color: var(--tx); font-weight: 500; }
+
+  /* Log table colors */
+  .log-ban { color: var(--red); }
+  .log-balance { color: var(--yellow); }
+  .log-config { color: var(--blue); }
+  .log-grant { color: var(--green); }
+
+  @media (max-width: 768px) {
+    #sidebar { display: none; }
+    .grid-2, .grid-3 { grid-template-columns: 1fr; }
+    .stats-grid { grid-template-columns: 1fr 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div id="login-screen" style="display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column;gap:16px;">
+  <div style="font-size:22px;font-weight:700;color:var(--green);margin-bottom:8px;">⛏ FORGE ADMIN</div>
+  <input id="pw-input" type="password" placeholder="Admin password" style="max-width:280px;text-align:center;" onkeydown="if(event.key==='Enter')doLogin()">
+  <button class="btn btn-primary" onclick="doLogin()">Sign In</button>
+  <div id="login-err" style="color:var(--red);font-size:11px;min-height:16px;"></div>
+</div>
+
+<div id="app" style="display:none;">
+  <div id="sidebar">
+    <div class="sb-logo">⛏ FORGE ADMIN</div>
+    <div class="sb-section">Overview</div>
+    <div class="sb-link active" onclick="nav('dashboard')"><span class="icon">◈</span> Dashboard</div>
+    <div class="sb-link" onclick="nav('analytics')"><span class="icon">◉</span> Analytics</div>
+    <div class="sb-section">Users</div>
+    <div class="sb-link" onclick="nav('users')"><span class="icon">👤</span> All Users</div>
+    <div class="sb-link" onclick="nav('user-detail')"><span class="icon">🔍</span> User Lookup</div>
+    <div class="sb-section">Economy</div>
+    <div class="sb-link" onclick="nav('halving')"><span class="icon">⚡</span> Halving</div>
+    <div class="sb-link" onclick="nav('config')"><span class="icon">⚙</span> Config</div>
+    <div class="sb-link" onclick="nav('store')"><span class="icon">💎</span> Purchases</div>
+    <div class="sb-section">Ops</div>
+    <div class="sb-link" onclick="nav('broadcast')"><span class="icon">📢</span> Broadcast</div>
+    <div class="sb-link" onclick="nav('logs')"><span class="icon">📋</span> Audit Log</div>
+    <div class="sb-link" onclick="nav('system')"><span class="icon">🛡</span> System</div>
+    <div class="sb-footer">Forge Admin v1.0</div>
+  </div>
+
+  <div id="main">
+    <div id="topbar">
+      <div style="font-size:13px;font-weight:600;color:var(--tx2);" id="topbar-title">Dashboard</div>
+      <div style="display:flex;gap:10px;align-items:center;">
+        <span id="maintenance-badge" style="display:none;" class="badge badge-red">MAINTENANCE</span>
+        <button class="btn btn-ghost btn-sm" onclick="refreshPage()">↻ Refresh</button>
+        <button class="btn btn-ghost btn-sm" onclick="doLogout()">Sign Out</button>
+      </div>
+    </div>
+    <div id="content">
+
+      <!-- DASHBOARD -->
+      <div id="page-dashboard" class="page active">
+        <div class="page-title">Dashboard</div>
+        <div class="page-sub">Real-time overview of Forge mining app</div>
+        <div class="stats-grid" id="dash-stats">
+          <div class="stat-card"><div class="stat-val" id="s-users">—</div><div class="stat-lbl">Total Users</div></div>
+          <div class="stat-card green"><div class="stat-val" id="s-mining">—</div><div class="stat-lbl">Active Mining</div></div>
+          <div class="stat-card blue"><div class="stat-val" id="s-today">—</div><div class="stat-lbl">New Today</div></div>
+          <div class="stat-card yellow"><div class="stat-val" id="s-revenue">—</div><div class="stat-lbl">Revenue 30d (TON)</div></div>
+          <div class="stat-card"><div class="stat-val" id="s-mined">—</div><div class="stat-lbl">Total FRG Mined</div></div>
+          <div class="stat-card"><div class="stat-val" id="s-balance">—</div><div class="stat-lbl">Total FRG in Wallets</div></div>
+        </div>
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-title">Top Miners</div>
+            <table><thead><tr><th>#</th><th>User</th><th>Mined</th><th>Balance</th></tr></thead>
+            <tbody id="top-miners"></tbody></table>
+          </div>
+          <div class="card">
+            <div class="card-title">User Growth (30 days)</div>
+            <div class="chart-wrap" id="growth-chart"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ANALYTICS -->
+      <div id="page-analytics" class="page">
+        <div class="page-title">Analytics</div>
+        <div class="page-sub">Mining economy and user behavior</div>
+        <div class="grid-3">
+          <div class="stat-card"><div class="stat-val" id="a-purchases">—</div><div class="stat-lbl">Total Purchases</div></div>
+          <div class="stat-card green"><div class="stat-val" id="a-automine">—</div><div class="stat-lbl">AutoMine Users</div></div>
+          <div class="stat-card blue"><div class="stat-val" id="a-perm">—</div><div class="stat-lbl">Perm 2× Users</div></div>
+        </div>
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-title">Recent Purchases</div>
+            <div class="tbl-wrap">
+              <table><thead><tr><th>User</th><th>Item</th><th>Price (TON)</th><th>Date</th></tr></thead>
+              <tbody id="recent-purchases"></tbody></table>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title">Mining Status Breakdown</div>
+            <div id="mining-breakdown" style="padding:8px 0;"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- USERS -->
+      <div id="page-users" class="page">
+        <div class="page-title">Users</div>
+        <div class="page-sub">Search, inspect and manage all users</div>
+        <div class="search-bar">
+          <input id="user-search" placeholder="Search by username, name or ID..." onkeydown="if(event.key==='Enter')loadUsers()">
+          <button class="btn btn-primary btn-sm" onclick="loadUsers()">Search</button>
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('user-search').value='';loadUsers()">Clear</button>
+        </div>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr><th>ID</th><th>Name</th><th>Balance</th><th>Total Mined</th><th>AutoMine</th><th>Banned</th><th>Joined</th><th>Action</th></tr></thead>
+            <tbody id="users-tbody"></tbody>
+          </table>
+        </div>
+        <div class="pagination">
+          <button class="btn btn-ghost btn-sm" onclick="usersPage--; loadUsers()">‹ Prev</button>
+          <span id="users-page-info"></span>
+          <button class="btn btn-ghost btn-sm" onclick="usersPage++; loadUsers()">Next ›</button>
+        </div>
+      </div>
+
+      <!-- USER DETAIL -->
+      <div id="page-user-detail" class="page">
+        <div class="page-title">User Detail</div>
+        <div class="page-sub">Full profile, purchases, upgrades and actions</div>
+        <div class="search-bar">
+          <input id="uid-input" placeholder="Enter Telegram user ID..." type="number">
+          <button class="btn btn-primary btn-sm" onclick="loadUserDetail()">Load</button>
+        </div>
+        <div id="user-detail-content"></div>
+      </div>
+
+      <!-- HALVING -->
+      <div id="page-halving" class="page">
+        <div class="page-title">Halving Control</div>
+        <div class="page-sub">Edit milestones, rates, and history</div>
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-title">Current Status</div>
+            <div id="halving-status"></div>
+          </div>
+          <div class="card">
+            <div class="card-title">History</div>
+            <div id="halving-history"></div>
+          </div>
+        </div>
+        <div class="card" style="margin-top:16px;">
+          <div class="card-title">Edit Epochs</div>
+          <div id="epochs-editor"></div>
+          <div style="display:flex;gap:10px;margin-top:12px;">
+            <button class="btn btn-ghost btn-sm" onclick="addEpoch()">+ Add Epoch</button>
+            <button class="btn btn-primary btn-sm" onclick="saveEpochs()">Save Epochs</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- CONFIG -->
+      <div id="page-config" class="page">
+        <div class="page-title">Configuration</div>
+        <div class="page-sub">All live config values — changes take effect within 60 seconds</div>
+        <div class="card">
+          <div id="config-rows"></div>
+          <div style="margin-top:16px;">
+            <button class="btn btn-primary" onclick="saveAllConfig()">Save All Changes</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- STORE / PURCHASES -->
+      <div id="page-store" class="page">
+        <div class="page-title">Purchases</div>
+        <div class="page-sub">All verified purchases and manual grants</div>
+        <div style="display:flex;gap:10px;margin-bottom:16px;">
+          <button class="btn btn-primary btn-sm" onclick="openManualGrant()">+ Manual Grant</button>
+        </div>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr><th>User</th><th>Item</th><th>TON</th><th>Stars</th><th>Date</th></tr></thead>
+            <tbody id="purchases-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- BROADCAST -->
+      <div id="page-broadcast" class="page">
+        <div class="page-title">Broadcast</div>
+        <div class="page-sub">Send messages to users — in-app notifications or Telegram bot messages</div>
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-title">In-App Notification</div>
+            <div class="form-row"><label>Title</label><input id="notif-title" placeholder="Notification title"></div>
+            <div class="form-row"><label>Body</label><textarea id="notif-body" placeholder="Notification message..."></textarea></div>
+            <div class="form-row"><label>User ID (blank = all users)</label><input id="notif-uid" placeholder="Leave blank for all" type="number"></div>
+            <button class="btn btn-primary" onclick="sendNotification()">Send Notification</button>
+          </div>
+          <div class="card">
+            <div class="card-title">Telegram Bot Message</div>
+            <div style="padding:8px;background:rgba(255,77,77,.06);border:1px solid rgba(255,77,77,.15);border-radius:8px;margin-bottom:14px;font-size:11px;color:var(--tx2);">
+              ⚠ Bot messages cost quota. For all users, sends in batches of 1000 at 20/sec. Use sparingly.
+            </div>
+            <div class="form-row"><label>Message (HTML supported)</label><textarea id="tg-msg" placeholder="&lt;b&gt;Announcement&lt;/b&gt;: ..."></textarea></div>
+            <div class="form-row"><label>User ID (blank = all users)</label><input id="tg-uid" placeholder="Leave blank for all" type="number"></div>
+            <button class="btn btn-danger" onclick="sendTelegram()">Send Bot Message</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- AUDIT LOG -->
+      <div id="page-logs" class="page">
+        <div class="page-title">Audit Log</div>
+        <div class="page-sub">All admin actions recorded here</div>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr><th>Time</th><th>Action</th><th>Target</th><th>Old</th><th>New</th><th>IP</th></tr></thead>
+            <tbody id="logs-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- SYSTEM -->
+      <div id="page-system" class="page">
+        <div class="page-title">System</div>
+        <div class="page-sub">App controls and danger zone</div>
+        <div class="card" style="margin-bottom:16px;">
+          <div class="card-title">App Controls</div>
+          <div class="toggle-row">
+            <div class="toggle-info"><div class="tl">Maintenance Mode</div><div class="ts">Blocks all API access except admin. Shows 503 to users.</div></div>
+            <button class="toggle" id="toggle-maintenance" onclick="toggleMaintenance(this)"></button>
+          </div>
+          <div class="toggle-row">
+            <div class="toggle-info"><div class="tl">Registration Open</div><div class="ts">Allow new users to join. Disable to lock registrations.</div></div>
+            <button class="toggle on" id="toggle-registration" onclick="toggleRegistration(this)"></button>
+          </div>
+        </div>
+        <div class="card" style="margin-bottom:16px;">
+          <div class="card-title">Cache</div>
+          <div style="display:flex;gap:10px;align-items:center;">
+            <span style="font-size:12px;color:var(--tx2);">Flush all Redis cache — config, leaderboard, auth sessions</span>
+            <button class="btn btn-danger btn-sm" onclick="flushCache()">Flush Cache</button>
+          </div>
+        </div>
+        <div class="card" style="border-color:rgba(255,77,77,.2);">
+          <div class="card-title" style="color:var(--red);">Danger Zone</div>
+          <div style="font-size:12px;color:var(--tx3);margin-bottom:12px;">These actions are irreversible and logged.</div>
+          <div style="display:flex;gap:10px;">
+            <button class="btn btn-danger btn-sm" onclick="if(confirm('Stop ALL active mining sessions?'))stopAllMining()">Stop All Mining</button>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /content -->
+  </div><!-- /main -->
+</div><!-- /app -->
+
+<!-- Modals -->
+<div id="modal-overlay" class="modal-overlay" style="display:none;" onclick="closeModal(event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <h3 id="modal-title"></h3>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+    <div class="modal-footer" id="modal-footer"></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ─── State ──────────────────────────────────────────────────────────────────
+let TOKEN = localStorage.getItem('forge_admin_token') || ''
+let API = window.location.origin.includes('localhost') ? 'http://localhost:3001' : window.location.origin
+let usersPage = 1
+let configCache = {}
+let epochsCache = []
+let currentPage = 'dashboard'
+
+// Override API base if admin is served from different origin
+// API = 'https://your-backend-url.com'
+
+// ─── Auth ────────────────────────────────────────────────────────────────────
+async function doLogin() {
+  const pw = document.getElementById('pw-input').value
+  try {
+    const res = await fetch(`${API}/api/admin/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pw })
+    })
+    const d = await res.json()
+    if (!d.token) throw new Error(d.error || 'Login failed')
+    TOKEN = d.token
+    localStorage.setItem('forge_admin_token', TOKEN)
+    document.getElementById('login-screen').style.display = 'none'
+    document.getElementById('app').style.display = 'flex'
+    nav('dashboard')
+  } catch(e) {
+    document.getElementById('login-err').textContent = e.message
+  }
+}
+
+function doLogout() {
+  TOKEN = ''
+  localStorage.removeItem('forge_admin_token')
+  location.reload()
+}
+
+// Check if already logged in
+if (TOKEN) {
+  document.getElementById('login-screen').style.display = 'none'
+  document.getElementById('app').style.display = 'flex'
+  setTimeout(() => nav('dashboard'), 0)
+}
+
+// ─── API helper ──────────────────────────────────────────────────────────────
+async function api(method, path, body) {
+  const res = await fetch(`${API}${path}`, {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${TOKEN}`
+    },
+    body: body ? JSON.stringify(body) : undefined
+  })
+  if (res.status === 401) { doLogout(); return }
+  return res.json()
+}
+
+// ─── Toast ───────────────────────────────────────────────────────────────────
+function toast(msg, type='success') {
+  const t = document.getElementById('toast')
+  const el = document.createElement('div')
+  el.className = `toast-item ${type}`
+  el.textContent = (type === 'success' ? '✓ ' : '✗ ') + msg
+  t.appendChild(el)
+  setTimeout(() => el.remove(), 3500)
+}
+
+// ─── Navigation ──────────────────────────────────────────────────────────────
+function nav(page) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'))
+  document.querySelectorAll('.sb-link').forEach(l => l.classList.remove('active'))
+  document.getElementById(`page-${page}`).classList.add('active')
+  const link = [...document.querySelectorAll('.sb-link')].find(l => l.getAttribute('onclick')?.includes(`'${page}'`))
+  if (link) link.classList.add('active')
+  document.getElementById('topbar-title').textContent = page.charAt(0).toUpperCase() + page.slice(1).replace('-', ' ')
+  currentPage = page
+  loadPage(page)
+}
+
+function refreshPage() { loadPage(currentPage) }
+
+async function loadPage(page) {
+  if (page === 'dashboard')   loadDashboard()
+  if (page === 'analytics')   loadAnalytics()
+  if (page === 'users')       loadUsers()
+  if (page === 'halving')     loadHalving()
+  if (page === 'config')      loadConfig()
+  if (page === 'store')       loadPurchases()
+  if (page === 'logs')        loadLogs()
+  if (page === 'system')      loadSystem()
+}
+
+// ─── Dashboard ───────────────────────────────────────────────────────────────
+async function loadDashboard() {
+  const [stats, growth] = await Promise.all([
+    api('GET', '/api/admin/stats'),
+    api('GET', '/api/admin/growth')
+  ])
+  if (!stats) return
+
+  document.getElementById('s-users').textContent   = stats.total_users?.toLocaleString()
+  document.getElementById('s-mining').textContent  = stats.active_mining?.toLocaleString()
+  document.getElementById('s-today').textContent   = stats.new_today?.toLocaleString()
+  document.getElementById('s-revenue').textContent = stats.revenue_30d_ton?.toFixed(2)
+  document.getElementById('s-mined').textContent   = fmtNum(stats.total_mined)
+  document.getElementById('s-balance').textContent = fmtNum(stats.total_balance)
+
+  // Top miners
+  const tbody = document.getElementById('top-miners')
+  tbody.innerHTML = stats.top_users?.map((u, i) => `
+    <tr>
+      <td>${i+1}</td>
+      <td class="bold">${esc(u.first_name || u.username || u.id)}</td>
+      <td class="td-green">${fmtNum(u.mined)} FRG</td>
+      <td>${fmtNum(u.bal)} FRG</td>
+    </tr>
+  `).join('') || ''
+
+  // Growth chart
+  if (growth?.growth) {
+    const bars = document.getElementById('growth-chart')
+    const max = Math.max(...growth.growth.map(d => parseInt(d.users)), 1)
+    bars.innerHTML = growth.growth.map(d => `
+      <div class="chart-bar" style="height:${Math.max(4, (parseInt(d.users)/max)*160)}px" data-v="${d.day}: ${d.users}"></div>
+    `).join('')
+  }
+}
+
+// ─── Analytics ───────────────────────────────────────────────────────────────
+async function loadAnalytics() {
+  const [purchases, stats] = await Promise.all([
+    api('GET', '/api/admin/purchases'),
+    api('GET', '/api/admin/stats')
+  ])
+
+  document.getElementById('a-purchases').textContent = stats?.purchases_30d || '—'
+
+  // Count automine and perm from purchases
+  const ps = purchases?.purchases || []
+  const autoCount = new Set(ps.filter(p => p.item_id?.includes('auto')).map(p => p.user_id)).size
+  const permCount = new Set(ps.filter(p => p.item_id === 'speed_perm').map(p => p.user_id)).size
+  document.getElementById('a-automine').textContent = autoCount
+  document.getElementById('a-perm').textContent = permCount
+
+  document.getElementById('recent-purchases').innerHTML = ps.slice(0, 20).map(p => `
+    <tr>
+      <td class="bold">${esc(p.first_name || p.username || p.user_id)}</td>
+      <td><span class="badge badge-green">${esc(p.item_id)}</span></td>
+      <td>${p.price_ton ? p.price_ton + ' TON' : '—'}</td>
+      <td>${fmtDate(p.created_at)}</td>
+    </tr>
+  `).join('')
+
+  document.getElementById('mining-breakdown').innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:8px;padding:8px 0;">
+      <div style="display:flex;justify-content:space-between;font-size:12px;">
+        <span style="color:var(--tx3)">Active Mining</span>
+        <span style="color:var(--green)">${stats?.active_mining || 0}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:12px;">
+        <span style="color:var(--tx3)">AutoMine Users</span>
+        <span style="color:var(--blue)">${autoCount}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:12px;">
+        <span style="color:var(--tx3)">Perm 2× Users</span>
+        <span style="color:var(--purple)">${permCount}</span>
+      </div>
+    </div>
+  `
+}
+
+// ─── Users ───────────────────────────────────────────────────────────────────
+async function loadUsers() {
+  const search = document.getElementById('user-search')?.value || ''
+  const data = await api('GET', `/api/admin/users?page=${usersPage}&limit=50&search=${encodeURIComponent(search)}`)
+  if (!data) return
+
+  document.getElementById('users-tbody').innerHTML = data.users.map(u => `
+    <tr>
+      <td class="td-green" style="font-family:monospace;">${u.id}</td>
+      <td class="bold">${esc(u.first_name || u.username || '—')}</td>
+      <td>${fmtNum(u.balance)} FRG</td>
+      <td>${fmtNum(u.total_mined)} FRG</td>
+      <td>${u.automine_lifetime ? '<span class="badge badge-purple">LIFETIME</span>' : u.automine_until ? '<span class="badge badge-green">ACTIVE</span>' : '<span class="badge badge-yellow">NONE</span>'}</td>
+      <td>${u.is_banned ? '<span class="badge badge-red">BANNED</span>' : '—'}</td>
+      <td>${fmtDate(u.created_at)}</td>
+      <td><button class="btn btn-ghost btn-sm" onclick="openUserModal(${u.id})">View</button></td>
+    </tr>
+  `).join('')
+
+  document.getElementById('users-page-info').textContent = `Page ${usersPage} of ${Math.ceil(data.total/50)} (${data.total} total)`
+}
+
+// ─── User Lookup ─────────────────────────────────────────────────────────────
+async function loadUserDetail() {
+  const uid = document.getElementById('uid-input').value
+  if (!uid) return
+  const data = await api('GET', `/api/admin/users/${uid}`)
+  if (!data?.user) { toast('User not found', 'error'); return }
+  const u = data.user
+
+  document.getElementById('user-detail-content').innerHTML = `
+    <div class="card" style="margin-bottom:16px;">
+      <div class="card-title">Profile</div>
+      <div class="detail-grid">
+        <div class="detail-item"><div class="dl">Telegram ID</div><div class="dv">${u.id}</div></div>
+        <div class="detail-item"><div class="dl">Username</div><div class="dv">@${u.username || '—'}</div></div>
+        <div class="detail-item"><div class="dl">Name</div><div class="dv">${esc(u.first_name || '')} ${esc(u.last_name || '')}</div></div>
+        <div class="detail-item"><div class="dl">Balance</div><div class="dv td-green">${fmtNum(u.balance/10000)} FRG</div></div>
+        <div class="detail-item"><div class="dl">Total Mined</div><div class="dv">${fmtNum(u.total_mined/10000)} FRG</div></div>
+        <div class="detail-item"><div class="dl">Blocks Found</div><div class="dv">${u.blocks_found}</div></div>
+        <div class="detail-item"><div class="dl">Referrals</div><div class="dv">${data.ref_count}</div></div>
+        <div class="detail-item"><div class="dl">Joined</div><div class="dv">${fmtDate(u.created_at)}</div></div>
+        <div class="detail-item"><div class="dl">AutoMine</div><div class="dv">${u.automine_lifetime ? '♾ LIFETIME' : u.automine_until ? 'Until ' + fmtDate(u.automine_until) : 'None'}</div></div>
+        <div class="detail-item"><div class="dl">Speed Perm</div><div class="dv">${u.speed_perm ? '✓ YES' : 'No'}</div></div>
+        <div class="detail-item"><div class="dl">Mining Since</div><div class="dv">${u.mining_start ? fmtDate(u.mining_start) : '—'}</div></div>
+        <div class="detail-item"><div class="dl">Status</div><div class="dv">${u.is_banned ? '<span class="badge badge-red">BANNED</span>' : '<span class="badge badge-green">ACTIVE</span>'}</div></div>
+      </div>
+    </div>
+    <div class="grid-2" style="margin-bottom:16px;">
+      <div class="card">
+        <div class="card-title">Actions</div>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <div class="form-inline">
+            <div class="form-row"><label>Adjust Balance (FRG)</label><input id="adj-bal" type="number" placeholder="+1000 or -500"></div>
+            <button class="btn btn-ghost btn-sm" onclick="adjustBalance(${u.id})" style="margin-top:4px;">Apply</button>
+          </div>
+          <div class="form-inline">
+            <div class="form-row"><label>Grant AutoMine (days)</label><input id="adj-auto" type="number" placeholder="30"></div>
+            <button class="btn btn-ghost btn-sm" onclick="grantAutomine(${u.id})" style="margin-top:4px;">Grant</button>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="grantAutomineLifetime(${u.id})">Grant Lifetime AutoMine</button>
+          <button class="btn btn-ghost btn-sm" onclick="grantSpeedPerm(${u.id}, true)">Grant Perm 2×</button>
+          <button class="btn ${u.is_banned ? 'btn-primary' : 'btn-danger'} btn-sm" onclick="banUser(${u.id}, ${!u.is_banned})">${u.is_banned ? 'Unban User' : 'Ban User'}</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Upgrades</div>
+        ${data.upgrades.length ? data.upgrades.map(up => `
+          <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--br);">
+            <span style="color:var(--tx2)">Upgrade #${up.upgrade_id}</span>
+            <span class="badge badge-yellow">Level ${up.level}</span>
+          </div>
+        `).join('') : '<div style="color:var(--tx3);font-size:12px;">No upgrades</div>'}
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Purchase History</div>
+      <div class="tbl-wrap">
+        <table><thead><tr><th>Item</th><th>TON</th><th>Stars</th><th>Date</th></tr></thead>
+        <tbody>${data.purchases.map(p => `
+          <tr>
+            <td><span class="badge badge-green">${esc(p.item_id)}</span></td>
+            <td>${p.price_ton || '—'}</td>
+            <td>${p.price_stars || '—'}</td>
+            <td>${fmtDate(p.created_at)}</td>
+          </tr>
+        `).join('')}</tbody></table>
+      </div>
+    </div>
+  `
+}
+
+// User action helpers
+async function adjustBalance(uid) {
+  const amt = parseFloat(document.getElementById('adj-bal').value)
+  if (!amt) return
+  await api('PATCH', `/api/admin/users/${uid}/balance`, { amount: amt, reason: 'Admin adjustment' })
+  toast(`Balance adjusted by ${amt} FRG`)
+  loadUserDetail()
+}
+async function grantAutomine(uid) {
+  const days = parseInt(document.getElementById('adj-auto').value)
+  if (!days) return
+  await api('PATCH', `/api/admin/users/${uid}/automine`, { days })
+  toast(`Granted ${days} days automine`)
+  loadUserDetail()
+}
+async function grantAutomineLifetime(uid) {
+  if (!confirm('Grant lifetime automine?')) return
+  await api('PATCH', `/api/admin/users/${uid}/automine`, { lifetime: true })
+  toast('Granted lifetime automine'); loadUserDetail()
+}
+async function grantSpeedPerm(uid, enabled) {
+  await api('PATCH', `/api/admin/users/${uid}/speed-perm`, { enabled })
+  toast('Updated speed perm'); loadUserDetail()
+}
+async function banUser(uid, banned) {
+  await api('PATCH', `/api/admin/users/${uid}/ban`, { banned })
+  toast(banned ? 'User banned' : 'User unbanned'); loadUserDetail()
+}
+
+async function openUserModal(id) {
+  document.getElementById('uid-input').value = id
+  nav('user-detail')
+  await loadUserDetail()
+}
+
+// ─── Halving ─────────────────────────────────────────────────────────────────
+async function loadHalving() {
+  const data = await api('GET', '/api/admin/halving')
+  if (!data) return
+  epochsCache = data.epochs
+
+  // Status
+  let currentEpoch = data.epochs[0]
+  for (let i = data.epochs.length - 1; i >= 0; i--) {
+    if (data.total_users >= data.epochs[i].users) { currentEpoch = data.epochs[i]; break }
+  }
+  document.getElementById('halving-status').innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:10px;padding:8px 0;">
+      <div style="display:flex;justify-content:space-between;"><span style="color:var(--tx3)">Total Users</span><strong>${data.total_users?.toLocaleString()}</strong></div>
+      <div style="display:flex;justify-content:space-between;"><span style="color:var(--tx3)">Current Epoch</span><span class="badge badge-yellow">${currentEpoch.label}</span></div>
+      <div style="display:flex;justify-content:space-between;"><span style="color:var(--tx3)">Rate Multiplier</span><strong style="color:var(--green)">${currentEpoch.rate}×</strong></div>
+    </div>
+  `
+
+  // History
+  document.getElementById('halving-history').innerHTML = data.history.length
+    ? data.history.map(h => `
+        <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--br);font-size:12px;">
+          <span>Epoch ${h.epoch_index}</span>
+          <span style="color:var(--tx3)">${h.users_at_time?.toLocaleString()} users</span>
+          <span style="color:var(--tx3)">${fmtDate(h.triggered_at)}</span>
+        </div>
+      `).join('')
+    : '<div style="color:var(--tx3);font-size:12px;padding:8px 0;">No halvings yet</div>'
+
+  renderEpochsEditor()
+}
+
+function renderEpochsEditor() {
+  document.getElementById('epochs-editor').innerHTML = epochsCache.map((e, i) => `
+    <div class="epoch-row">
+      <div><label style="font-size:9px;color:var(--tx3);display:block;margin-bottom:3px;">Label</label>
+        <input value="${esc(e.label)}" onchange="epochsCache[${i}].label=this.value"></div>
+      <div><label style="font-size:9px;color:var(--tx3);display:block;margin-bottom:3px;">Users Trigger</label>
+        <input type="number" value="${e.users}" onchange="epochsCache[${i}].users=parseInt(this.value)"></div>
+      <div><label style="font-size:9px;color:var(--tx3);display:block;margin-bottom:3px;">Rate</label>
+        <input type="number" step="0.001" value="${e.rate}" onchange="epochsCache[${i}].rate=parseFloat(this.value)"></div>
+      <button class="btn btn-danger btn-sm" onclick="epochsCache.splice(${i},1);renderEpochsEditor()" style="margin-top:18px;">✕</button>
+    </div>
+  `).join('')
+}
+
+function addEpoch() {
+  epochsCache.push({ users: 0, label: 'New', rate: 0.5 })
+  renderEpochsEditor()
+}
+
+async function saveEpochs() {
+  await api('PATCH', '/api/admin/halving', { epochs: epochsCache })
+  toast('Epochs saved'); loadHalving()
+}
+
+// ─── Config ───────────────────────────────────────────────────────────────────
+async function loadConfig() {
+  const data = await api('GET', '/api/admin/config')
+  if (!data) return
+  configCache = { ...data.config }
+
+  const CONFIG_META = {
+    base_rate:             { label: 'Base Mining Rate (FRG/s)', type: 'number' },
+    automine_offline_cap:  { label: 'AutoMine Offline Cap (seconds)', type: 'number' },
+    referral_bonus_frg:    { label: 'Referral Join Bonus (FRG)', type: 'number' },
+    referral_percent:      { label: 'Referral Commission (%)', type: 'number' },
+    daily_reward_base:     { label: 'Daily Reward Base (FRG)', type: 'number' },
+    max_circle_size:       { label: 'Max Security Circle Size', type: 'number' },
+    heartbeat_timeout_sec: { label: 'Heartbeat Timeout (seconds)', type: 'number' },
+    maintenance_mode:      { label: 'Maintenance Mode', type: 'text' },
+    registration_open:     { label: 'Registration Open', type: 'text' },
+    halving_epochs:        { label: 'Halving Epochs JSON', type: 'textarea' },
+  }
+
+  document.getElementById('config-rows').innerHTML = Object.entries(data.config).map(([key, val]) => {
+    const meta = CONFIG_META[key] || { label: key, type: 'text' }
+    const inputEl = meta.type === 'textarea'
+      ? `<textarea id="cfg-${key}" style="font-size:11px;min-height:60px;">${esc(val)}</textarea>`
+      : `<input id="cfg-${key}" type="${meta.type}" value="${esc(val)}">`
+    return `
+      <div class="cfg-row">
+        <div><div class="cfg-key">${key}</div><div style="font-size:10px;color:var(--tx2);margin-top:2px;">${meta.label}</div></div>
+        <div class="cfg-val">${inputEl}</div>
+        <button class="btn btn-ghost btn-sm" onclick="saveSingleConfig('${key}')">Save</button>
+      </div>
+    `
+  }).join('')
+}
+
+async function saveSingleConfig(key) {
+  const el = document.getElementById(`cfg-${key}`)
+  await api('PATCH', '/api/admin/config', { key, value: el.value })
+  toast(`${key} saved`)
+}
+
+async function saveAllConfig() {
+  const changes = {}
+  Object.keys(configCache).forEach(key => {
+    const el = document.getElementById(`cfg-${key}`)
+    if (el) changes[key] = el.value
+  })
+  await api('PATCH', '/api/admin/config/bulk', { changes })
+  toast('All config saved')
+}
+
+// ─── Purchases ────────────────────────────────────────────────────────────────
+async function loadPurchases() {
+  const data = await api('GET', '/api/admin/purchases')
+  if (!data) return
+  document.getElementById('purchases-tbody').innerHTML = data.purchases.map(p => `
+    <tr>
+      <td class="bold">${esc(p.first_name || p.username || p.user_id)}</td>
+      <td><span class="badge badge-green">${esc(p.item_id)}</span></td>
+      <td>${p.price_ton ? p.price_ton + ' TON' : '—'}</td>
+      <td>${p.price_stars ? p.price_stars + ' ⭐' : '—'}</td>
+      <td>${fmtDate(p.created_at)}</td>
+    </tr>
+  `).join('')
+}
+
+function openManualGrant() {
+  openModal('Manual Grant', `
+    <div class="form-row"><label>User ID</label><input id="mg-uid" type="number" placeholder="Telegram user ID"></div>
+    <div class="form-row"><label>Item ID</label>
+      <select id="mg-item">
+        <option value="auto_7d">auto_7d — 7 Day AutoMine</option>
+        <option value="auto_30d">auto_30d — 30 Day AutoMine</option>
+        <option value="auto_lifetime">auto_lifetime — Lifetime AutoMine</option>
+        <option value="speed_perm">speed_perm — Permanent 2×</option>
+        <option value="chest_s">chest_s — 25K FRG Chest</option>
+        <option value="chest_m">chest_m — 100K FRG Chest</option>
+        <option value="chest_xl">chest_xl — 500K FRG Chest</option>
+      </select>
+    </div>
+  `, async () => {
+    const uid = document.getElementById('mg-uid').value
+    const item = document.getElementById('mg-item').value
+    await api('POST', '/api/admin/purchases/manual', { user_id: uid, item_id: item })
+    toast('Granted!'); closeModal(); loadPurchases()
+  })
+}
+
+// ─── Broadcast ────────────────────────────────────────────────────────────────
+async function sendNotification() {
+  const title = document.getElementById('notif-title').value
+  const body  = document.getElementById('notif-body').value
+  const uid   = document.getElementById('notif-uid').value
+  if (!title || !body) { toast('Fill in title and body', 'error'); return }
+  await api('POST', '/api/admin/broadcast/notification', { title, body, user_id: uid || undefined })
+  toast(uid ? 'Notification sent to user' : 'Notification sent to all users')
+}
+
+async function sendTelegram() {
+  const msg = document.getElementById('tg-msg').value
+  const uid = document.getElementById('tg-uid').value
+  if (!msg) { toast('Enter a message', 'error'); return }
+  if (!uid && !confirm('Send to ALL users? This cannot be undone.')) return
+  const data = await api('POST', '/api/admin/broadcast/telegram', { message: msg, user_id: uid || undefined })
+  toast(uid ? 'Message sent' : `Sent: ${data?.sent}, Failed: ${data?.failed}`)
+}
+
+// ─── Logs ─────────────────────────────────────────────────────────────────────
+async function loadLogs() {
+  const data = await api('GET', '/api/admin/logs')
+  if (!data) return
+  document.getElementById('logs-tbody').innerHTML = data.logs.map(l => {
+    const cls = l.action.includes('ban') ? 'log-ban' : l.action.includes('balance') ? 'log-balance' : l.action.includes('config') ? 'log-config' : 'log-grant'
+    return `<tr>
+      <td style="color:var(--tx3)">${fmtDate(l.created_at)}</td>
+      <td class="${cls} bold">${esc(l.action)}</td>
+      <td style="color:var(--tx2)">${esc(l.target || '—')}</td>
+      <td style="color:var(--tx3)">${esc((l.old_value || '').slice(0,30))}</td>
+      <td style="color:var(--tx2)">${esc((l.new_value || '').slice(0,30))}</td>
+      <td style="color:var(--tx3)">${esc(l.ip || '—')}</td>
+    </tr>`
+  }).join('')
+}
+
+// ─── System ───────────────────────────────────────────────────────────────────
+async function loadSystem() {
+  const data = await api('GET', '/api/admin/config')
+  if (!data) return
+  const m = data.config.maintenance_mode === 'true'
+  const r = data.config.registration_open !== 'false'
+  const mt = document.getElementById('toggle-maintenance')
+  const rt = document.getElementById('toggle-registration')
+  mt.className = 'toggle' + (m ? ' on' : '')
+  rt.className = 'toggle' + (r ? ' on' : '')
+  document.getElementById('maintenance-badge').style.display = m ? 'inline-block' : 'none'
+}
+
+async function toggleMaintenance(el) {
+  const newVal = !el.classList.contains('on')
+  el.className = 'toggle' + (newVal ? ' on' : '')
+  await api('PATCH', '/api/admin/maintenance', { enabled: newVal })
+  document.getElementById('maintenance-badge').style.display = newVal ? 'inline-block' : 'none'
+  toast(newVal ? 'Maintenance ON' : 'Maintenance OFF')
+}
+
+async function toggleRegistration(el) {
+  const newVal = !el.classList.contains('on')
+  el.className = 'toggle' + (newVal ? ' on' : '')
+  await api('PATCH', '/api/admin/registration', { open: newVal })
+  toast(newVal ? 'Registration open' : 'Registration closed')
+}
+
+async function flushCache() {
+  if (!confirm('Flush all Redis cache?')) return
+  await api('POST', '/api/admin/cache/flush')
+  toast('Cache flushed')
+}
+
+async function stopAllMining() {
+  await api('POST', '/api/admin/maintenance', { enabled: true })
+  toast('All mining sessions stopped (maintenance mode ON)')
+  loadSystem()
+}
+
+// ─── Modal helpers ────────────────────────────────────────────────────────────
+function openModal(title, body, onConfirm) {
+  document.getElementById('modal-title').textContent = title
+  document.getElementById('modal-body').innerHTML = body
+  document.getElementById('modal-footer').innerHTML = `
+    <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-primary" onclick="modalConfirm()">Confirm</button>
+  `
+  document.getElementById('modal-overlay').style.display = 'flex'
+  window._modalConfirm = onConfirm
+}
+
+function closeModal(e) {
+  if (e && e.target !== document.getElementById('modal-overlay')) return
+  document.getElementById('modal-overlay').style.display = 'none'
+}
+
+function modalConfirm() {
+  if (window._modalConfirm) window._modalConfirm()
+}
+
+// ─── Utilities ────────────────────────────────────────────────────────────────
+function fmtNum(n) {
+  n = parseFloat(n) || 0
+  if (n >= 1e9) return (n/1e9).toFixed(2)+'B'
+  if (n >= 1e6) return (n/1e6).toFixed(2)+'M'
+  if (n >= 1e3) return (n/1e3).toFixed(1)+'K'
+  return n.toFixed(1)
+}
+
+function fmtDate(d) {
+  if (!d) return '—'
+  return new Date(d).toLocaleDateString('en-US', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' })
+}
+
+function esc(str) {
+  return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
+}
+</script>
+</body>
+</html>
