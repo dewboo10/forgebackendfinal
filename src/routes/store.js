@@ -1,6 +1,6 @@
 // src/routes/store.js
 import { telegramAuth } from '../middleware/auth.js'
-import { db, redis } from '../db/index.js'
+import { db } from '../db/index.js'
 import axios from 'axios'
 import TelegramBot from 'node-telegram-bot-api'
 

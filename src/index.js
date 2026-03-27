@@ -4,8 +4,7 @@ import cors from '@fastify/cors'
 import rateLimit from '@fastify/rate-limit'
 import 'dotenv/config'
 
-import { redis } from './db/index.js'
-import { scheduleJobs } from './jobs/index.js'
+import { scheduleJobs } from './jobs/index.js'   // ✅ removed redis import
 
 import fastifyStatic from '@fastify/static'
 import { fileURLToPath } from 'url'
@@ -40,7 +39,7 @@ await app.register(rateLimit, {
   global: true,
   max: 120,           // 120 req/min per IP — enough for normal use
   timeWindow: 60000,
-  redis,
+  // ✅ removed redis — uses in-memory store by default
   keyGenerator: (req) => req.headers['x-telegram-init-data']?.slice(0, 40) || req.ip,
   errorResponseBuilder: () => ({ error: 'Too many requests', retryAfter: 60 }),
 })

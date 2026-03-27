@@ -1,6 +1,6 @@
 // src/routes/auth.js
 import { parseTelegramInitData } from '../middleware/auth.js'
-import { db, getConfig, redis } from '../db/index.js'
+import { db, getConfig, cacheDel } from '../db/index.js'
 import crypto from 'crypto'
 
 function genRefCode(userId) {
@@ -10,25 +10,49 @@ function genRefCode(userId) {
 export default async function authRoutes(app) {
 
   // POST /api/auth/login
-  // Called on every app open. Creates user if new, returns full profile.
   app.post('/api/auth/login', async (req, reply) => {
-    const initData = req.headers['x-telegram-init-data']
-    const parsed = parseTelegramInitData(initData)
+    let tgUser
+    let startParam = ''
 
-    if (!parsed) return reply.code(401).send({ error: 'Invalid Telegram auth' })
+    if (process.env.NODE_ENV !== 'production' && process.env.DEV_USER_ID) {
+      const devId = Number(process.env.DEV_USER_ID)
+      const { rows } = await db.query('SELECT * FROM users WHERE id=$1', [devId])
+      if (rows[0]) {
+        tgUser = rows[0]
+      } else {
+        tgUser = {
+          id: devId,
+          username: 'dev_user',
+          first_name: 'Dev',
+          last_name: 'User',
+          photo_url: null,
+          language_code: 'en',
+        }
+      }
 
-    const { user: tgUser } = parsed
+      const initData = req.headers['x-telegram-init-data']
+      if (initData) {
+        const params = new URLSearchParams(initData)
+        startParam = params.get('start_param') || ''
+      }
+    } else {
+      const initData = req.headers['x-telegram-init-data']
+      const parsed = parseTelegramInitData(initData)
+
+      if (!parsed) return reply.code(401).send({ error: 'Invalid Telegram auth' })
+      tgUser = parsed.user
+
+      const params = new URLSearchParams(initData)
+      startParam = params.get('start_param') || ''
+    }
+
     const open = await getConfig('registration_open')
     const maintenance = await getConfig('maintenance_mode')
     if (maintenance === 'true') return reply.code(503).send({ error: 'Maintenance mode' })
 
-    // Referral: start_param in initData carries ref code
-    const params = new URLSearchParams(initData)
-    const startParam = params.get('start_param') || ''
     const refCode = startParam.startsWith('ref_') ? startParam.slice(4) : null
 
     return await db.tx(async (client) => {
-      // Upsert user
       const { rows } = await client.query(
         `INSERT INTO users (id, username, first_name, last_name, photo_url, language_code)
          VALUES ($1,$2,$3,$4,$5,$6)
@@ -42,14 +66,12 @@ export default async function authRoutes(app) {
       )
       let user = rows[0]
 
-      // Assign ref code if new
       if (!user.ref_code) {
         const code = genRefCode(user.id)
         await client.query('UPDATE users SET ref_code=$2 WHERE id=$1', [user.id, code])
         user.ref_code = code
       }
 
-      // Apply referral if new user and valid ref code
       if (!user.referred_by && refCode && open !== 'false') {
         const { rows: refRows } = await client.query(
           'SELECT id FROM users WHERE ref_code=$1 AND id!=$2',
@@ -62,14 +84,12 @@ export default async function authRoutes(app) {
             `INSERT INTO referrals (referrer_id, referee_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
             [referrerId, user.id]
           )
-          // Bonus FRG to new user
           const bonusStr = await getConfig('referral_bonus_frg')
           const bonus = parseInt(bonusStr || '5000')
           await client.query(
             'UPDATE users SET balance=balance+$2 WHERE id=$1',
             [user.id, bonus * 10000]
           )
-          // Notify referrer
           await client.query(
             `INSERT INTO notifications (user_id, type, title, body)
              VALUES ($1,'referral','New recruit joined!','${tgUser.first_name} joined using your link. +10% of all their mining goes to you.')`,
@@ -78,8 +98,8 @@ export default async function authRoutes(app) {
         }
       }
 
-      // Invalidate redis cache
-      await redis.del(`user:${user.id}`)
+      // Invalidate user cache
+      cacheDel(`user:${user.id}`)
 
       return reply.send({ ok: true, user: sanitizeUser(user) })
     })

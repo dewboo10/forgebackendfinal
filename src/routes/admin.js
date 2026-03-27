@@ -1,11 +1,10 @@
 // src/routes/admin.js — Full admin API
-import { db, redis, getConfig, setConfig, getAllConfig, getTotalUsers } from '../db/index.js'
+import { db, getConfig, setConfig, getAllConfig, getTotalUsers, cacheDel, cacheFlush } from '../db/index.js'
 import crypto from 'crypto'
 import TelegramBot from 'node-telegram-bot-api'
 
 const bot = new TelegramBot(process.env.BOT_TOKEN)
 
-// Simple JWT-like token for admin (stateless)
 function signAdminToken(secret) {
   const payload = { role: 'admin', ts: Date.now() }
   const str = Buffer.from(JSON.stringify(payload)).toString('base64url')
@@ -20,7 +19,6 @@ function verifyAdminToken(token, secret) {
   const expected = crypto.createHmac('sha256', secret).update(str).digest('base64url')
   if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return false
   const payload = JSON.parse(Buffer.from(str, 'base64url').toString())
-  // 24h expiry
   return (Date.now() - payload.ts) < 86400000
 }
 
@@ -40,7 +38,6 @@ async function logAction(action, target, oldVal, newVal, ip) {
 
 export default async function adminRoutes(app) {
 
-  // POST /api/admin/login
   app.post('/api/admin/login', async (req, reply) => {
     const { password } = req.body
     if (password !== process.env.ADMIN_PASSWORD)
@@ -49,7 +46,6 @@ export default async function adminRoutes(app) {
     return reply.send({ token })
   })
 
-  // All routes below require admin token
   const A = { preHandler: adminGuard }
 
   // ─── DASHBOARD STATS ──────────────────────────────────────────────────────
@@ -80,7 +76,6 @@ export default async function adminRoutes(app) {
     })
   })
 
-  // Growth chart — users per day for last 30 days
   app.get('/api/admin/growth', A, async (req, reply) => {
     const { rows } = await db.query(`
       SELECT DATE(created_at) day, COUNT(*) users
@@ -97,12 +92,8 @@ export default async function adminRoutes(app) {
     const search = req.query.search || ''
     const offset = (page - 1) * limit
 
-    const where = search
-      ? `WHERE (username ILIKE $3 OR first_name ILIKE $3 OR id::text=$4)`
-      : ''
-    const params = search
-      ? [limit, offset, `%${search}%`, search]
-      : [limit, offset]
+    const where = search ? `WHERE (username ILIKE $3 OR first_name ILIKE $3 OR id::text=$4)` : ''
+    const params = search ? [limit, offset, `%${search}%`, search] : [limit, offset]
 
     const { rows } = await db.query(
       `SELECT id, username, first_name, balance/10000.0 balance, total_mined/10000.0 total_mined,
@@ -128,9 +119,8 @@ export default async function adminRoutes(app) {
     return reply.send({ user: u, upgrades, purchases, ref_count: parseInt(refs[0].count) })
   })
 
-  // Adjust user balance
   app.patch('/api/admin/users/:id/balance', A, async (req, reply) => {
-    const { amount, reason } = req.body  // amount in FRG (can be negative)
+    const { amount, reason } = req.body
     const { rows } = await db.query('SELECT balance FROM users WHERE id=$1', [req.params.id])
     if (!rows.length) return reply.code(404).send({ error: 'Not found' })
     const old = rows[0].balance / 10000
@@ -143,7 +133,6 @@ export default async function adminRoutes(app) {
     return reply.send({ ok: true })
   })
 
-  // Ban / unban
   app.patch('/api/admin/users/:id/ban', A, async (req, reply) => {
     const { banned, reason } = req.body
     await db.query('UPDATE users SET is_banned=$2, mining_start=NULL WHERE id=$1', [req.params.id, banned])
@@ -151,7 +140,6 @@ export default async function adminRoutes(app) {
     return reply.send({ ok: true })
   })
 
-  // Grant automine
   app.patch('/api/admin/users/:id/automine', A, async (req, reply) => {
     const { days, lifetime } = req.body
     if (lifetime) {
@@ -166,13 +154,11 @@ export default async function adminRoutes(app) {
     return reply.send({ ok: true })
   })
 
-  // Grant speed_perm
   app.patch('/api/admin/users/:id/speed-perm', A, async (req, reply) => {
     await db.query('UPDATE users SET speed_perm=$2 WHERE id=$1', [req.params.id, req.body.enabled])
     return reply.send({ ok: true })
   })
 
-  // Reset upgrades
   app.delete('/api/admin/users/:id/upgrades', A, async (req, reply) => {
     await db.query('DELETE FROM user_upgrades WHERE user_id=$1', [req.params.id])
     await logAction('reset_upgrades', `user:${req.params.id}`, null, null, req.ip)
@@ -195,7 +181,7 @@ export default async function adminRoutes(app) {
   })
 
   app.patch('/api/admin/config/bulk', A, async (req, reply) => {
-    const { changes } = req.body  // { key: value, ... }
+    const { changes } = req.body
     for (const [key, value] of Object.entries(changes)) {
       const old = await getConfig(key)
       await setConfig(key, value)
@@ -214,7 +200,6 @@ export default async function adminRoutes(app) {
     return reply.send({ epochs, total_users: totalUsers, history })
   })
 
-  // Edit halving epochs
   app.patch('/api/admin/halving', A, async (req, reply) => {
     const { epochs } = req.body
     const old = await getConfig('halving_epochs')
@@ -223,17 +208,15 @@ export default async function adminRoutes(app) {
     return reply.send({ ok: true })
   })
 
-  // Manually trigger halving (for testing)
   app.post('/api/admin/halving/trigger', A, async (req, reply) => {
     const totalUsers = await getTotalUsers()
     await db.query('INSERT INTO halving_history (epoch_index, users_at_time) VALUES ($1,$2)', [req.body.epoch, totalUsers])
-    await redis.del('stat:total_users')
+    cacheDel('stat:total_users')
     return reply.send({ ok: true })
   })
 
   // ─── BROADCASTS ───────────────────────────────────────────────────────────
 
-  // Send in-app notification to all or specific user
   app.post('/api/admin/broadcast/notification', A, async (req, reply) => {
     const { title, body, user_id } = req.body
     if (user_id) {
@@ -252,20 +235,18 @@ export default async function adminRoutes(app) {
     return reply.send({ ok: true })
   })
 
-  // Send Telegram bot message (to specific user or all — use with care)
   app.post('/api/admin/broadcast/telegram', A, async (req, reply) => {
     const { message, user_id } = req.body
     if (user_id) {
       await bot.sendMessage(user_id, message, { parse_mode: 'HTML' })
     } else {
-      // Batch send — throttled to avoid Telegram rate limits
       const { rows } = await db.query('SELECT id FROM users WHERE is_banned=FALSE LIMIT 1000')
       let sent = 0, failed = 0
       for (const u of rows) {
         try {
           await bot.sendMessage(u.id, message, { parse_mode: 'HTML' })
           sent++
-          await new Promise(r => setTimeout(r, 50))  // 20/s rate limit
+          await new Promise(r => setTimeout(r, 50))
         } catch { failed++ }
       }
       await logAction('broadcast_telegram', 'all', null, message.slice(0, 50), req.ip)
@@ -320,8 +301,8 @@ export default async function adminRoutes(app) {
   // ─── CACHE FLUSH ──────────────────────────────────────────────────────────
 
   app.post('/api/admin/cache/flush', A, async (req, reply) => {
-    await redis.flushDb()
-    await logAction('cache_flush', 'redis', null, null, req.ip)
+    cacheFlush()
+    await logAction('cache_flush', 'memory', null, null, req.ip)
     return reply.send({ ok: true })
   })
 }

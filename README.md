@@ -66,6 +66,7 @@ Admin panel available at `http://localhost:3001/admin`
 | `ADMIN_PASSWORD`     | Password for admin panel login                   |
 | `JWT_SECRET`         | JWT secret                                       |
 | `FRONTEND_URL`       | Your Telegram Mini App URL (for CORS)            |
+| `DEV_USER_ID`        | (dev only) User id to bypass Telegram login during testing |
 
 ---
 
@@ -249,5 +250,6 @@ Make sure your Telegram bot's webhook is set to `https://your-backend-domain.com
 curl -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook" \
   -d '{"url":"https://your-domain.com/api/store/stars-webhook"}'
 ```
-#   f o r g e b a c k e n d f i n a l  
+#   f o r g e b a c k e n d f i n a l 
+ 
  

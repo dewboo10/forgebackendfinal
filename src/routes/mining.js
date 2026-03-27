@@ -1,6 +1,6 @@
 // src/routes/mining.js
 import { telegramAuth } from '../middleware/auth.js'
-import { db, redis } from '../db/index.js'
+import { db } from '../db/index.js'
 import {
   getMiningState, calcPendingEarnings, applyEarnings,
   getUserUpgrades, calcRate, getHalvingMultiplier,
@@ -11,12 +11,17 @@ export default async function miningRoutes(app) {
 
   // GET /api/mining/state
   app.get('/api/mining/state', { preHandler: telegramAuth }, async (req, reply) => {
-    const { rows } = await db.query('SELECT * FROM users WHERE id=$1', [req.user.id])
-    const state = await getMiningState(rows[0])
-    // Include authoritative balance so frontend can sync
-    state.balance = rows[0].balance / 10000
-    state.totalMined = rows[0].total_mined / 10000
-    return reply.send(state)
+    try {
+      const { rows } = await db.query('SELECT * FROM users WHERE id=$1', [req.user.id])
+      const state = await getMiningState(rows[0])
+      // Include authoritative balance so frontend can sync
+      state.balance = rows[0].balance / 10000
+      state.totalMined = rows[0].total_mined / 10000
+      return reply.send(state)
+    } catch (e) {
+      console.error('Mining state error:', e)
+      return reply.code(500).send({ error: 'Database error', details: e.message })
+    }
   })
 
   // POST /api/mining/start
@@ -35,22 +40,27 @@ export default async function miningRoutes(app) {
 
   // POST /api/mining/stop
   app.post('/api/mining/stop', { preHandler: telegramAuth }, async (req, reply) => {
-    const { rows } = await db.query('SELECT * FROM users WHERE id=$1', [req.user.id])
-    const user = rows[0]
-    if (!user.mining_start) return reply.send({ ok: true, earned: 0 })
+    try {
+      const { rows } = await db.query('SELECT * FROM users WHERE id=$1', [req.user.id])
+      const user = rows[0]
+      if (!user.mining_start) return reply.send({ ok: true, earned: 0 })
 
-    const halvingMult = await getHalvingMultiplier()
-    const upgrades = await getUserUpgrades(user.id)
-    const earned = await calcPendingEarnings(user, upgrades, halvingMult)
+      const halvingMult = await getHalvingMultiplier()
+      const upgrades = await getUserUpgrades(user.id)
+      const earned = await calcPendingEarnings(user, upgrades, halvingMult)
 
-    return await db.tx(async (client) => {
-      const result = await applyEarnings(client, user.id, earned)
-      // Pay referral commission
-      if (user.referred_by) {
-        await payReferralCommission(client, earned, user.referred_by)
-      }
-      return reply.send({ ok: true, earned, ...result })
-    })
+      return await db.tx(async (client) => {
+        const result = await applyEarnings(client, user.id, earned)
+        // Pay referral commission
+        if (user.referred_by) {
+          await payReferralCommission(client, earned, user.referred_by)
+        }
+        return reply.send({ ok: true, earned, ...result })
+      })
+    } catch (e) {
+      console.error('Mining stop error:', e)
+      return reply.code(500).send({ error: 'Database error', details: e.message })
+    }
   })
 
   // POST /api/mining/heartbeat — client pings every 20s while open

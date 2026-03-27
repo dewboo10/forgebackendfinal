@@ -1,6 +1,6 @@
 // src/middleware/auth.js
 import crypto from 'crypto'
-import { db, redis } from '../db/index.js'
+import { db, cacheGet, cacheSet, cacheDel } from '../db/index.js'
 
 // ─── Validate Telegram WebApp initData ────────────────────────────────────────
 export function parseTelegramInitData(initData) {
@@ -9,14 +9,12 @@ export function parseTelegramInitData(initData) {
   const hash = params.get('hash')
   if (!hash) return null
 
-  // Build check string — all params except hash, sorted
   params.delete('hash')
   const checkString = [...params.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([k, v]) => `${k}=${v}`)
     .join('\n')
 
-  // HMAC-SHA256 with key = HMAC-SHA256("WebAppData", BOT_TOKEN)
   const secretKey = crypto
     .createHmac('sha256', 'WebAppData')
     .update(process.env.BOT_TOKEN)
@@ -29,11 +27,9 @@ export function parseTelegramInitData(initData) {
 
   if (expectedHash !== hash) return null
 
-  // Check not expired (24h)
   const authDate = parseInt(params.get('auth_date') || '0')
   if (Date.now() / 1000 - authDate > 86400) return null
 
-  // Parse user
   try {
     const user = JSON.parse(params.get('user') || '{}')
     return { user, authDate }
@@ -44,12 +40,18 @@ export function parseTelegramInitData(initData) {
 
 // ─── Fastify preHandler: attach req.user from initData ────────────────────────
 export async function telegramAuth(req, reply) {
+    // DEV ONLY — remove before production
+  if (process.env.NODE_ENV !== 'production' && process.env.DEV_USER_ID) {
+    const { rows } = await db.query('SELECT * FROM users WHERE id=$1', [process.env.DEV_USER_ID])
+    if (rows[0]) { req.user = rows[0]; return }
+  }
+  
+  
   const initData = req.headers['x-telegram-init-data']
   if (!initData) return reply.code(401).send({ error: 'Missing auth' })
 
-  // Cache parsed user (avoid re-parsing on every request)
   const cacheKey = `auth:${crypto.createHash('md5').update(initData).digest('hex')}`
-  const cached = await redis.get(cacheKey)
+  const cached = cacheGet(cacheKey)
   if (cached) {
     req.user = JSON.parse(cached)
     return
@@ -65,7 +67,7 @@ export async function telegramAuth(req, reply) {
   if (dbUser.is_banned) return reply.code(403).send({ error: 'Account banned' })
 
   req.user = dbUser
-  await redis.setEx(cacheKey, 300, JSON.stringify(dbUser))
+  cacheSet(cacheKey, JSON.stringify(dbUser), 300)  // cache for 5 min
 }
 
 // ─── Admin JWT auth ───────────────────────────────────────────────────────────
@@ -81,7 +83,5 @@ export async function adminAuth(req, reply) {
 
 // ─── Invalidate user cache (call after mutations) ─────────────────────────────
 export async function invalidateUserCache(userId) {
-  const keys = await redis.keys(`auth:*`)
-  // Simpler: just store user-id keyed session separately
-  await redis.del(`user:${userId}`)
+  cacheDel(`user:${userId}`)
 }

@@ -1,6 +1,6 @@
 // src/routes/social.js — referrals, circle, profile, leaderboard, daily, wallet, notifications
 import { telegramAuth } from '../middleware/auth.js'
-import { db, getConfig, redis, getTotalUsers } from '../db/index.js'
+import { db, getConfig, getTotalUsers, cacheGet, cacheSet } from '../db/index.js'
 
 const REF_TIERS = [
   { refs: 1,   rewardType: 'speed',     frg: 5000,    days: 1,  label: 'First Blood' },
@@ -24,7 +24,7 @@ const DAILY_REWARDS = [500,1000,2000,3500,5000,8000,12000]
 
 export default async function socialRoutes(app) {
 
-  // ─── STATS (public) ─────────────────────────────────────────────────────────
+  // ─── STATS ──────────────────────────────────────────────────────────────────
 
   app.get('/api/stats', { preHandler: telegramAuth }, async (req, reply) => {
     const total = await getTotalUsers()
@@ -41,7 +41,6 @@ export default async function socialRoutes(app) {
       [req.user.id]
     )
     const refPct = await getConfig('referral_percent')
-    // Calculate total referral earnings = sum of all referee total_mined * referral_pct
     const pct = parseFloat(refPct) / 100
     const referralEarnings = rows.reduce((sum, r) => sum + (r.total_mined / 10000) * pct, 0)
     return reply.send({
@@ -96,12 +95,10 @@ export default async function socialRoutes(app) {
         `INSERT INTO ref_tier_claims (user_id, tier_refs) VALUES ($1,$2)`,
         [req.user.id, refs]
       )
-      // FRG bonus
       await client.query(
         'UPDATE users SET balance=balance+$2 WHERE id=$1',
         [req.user.id, tier.frg * 10000]
       )
-      // Automine reward
       if (tier.rewardType === 'automine' && tier.days) {
         await client.query(
           `UPDATE users SET automine_until=
@@ -220,9 +217,8 @@ export default async function socialRoutes(app) {
   app.get('/api/leaderboard', { preHandler: telegramAuth }, async (req, reply) => {
     const limit = Math.min(parseInt(req.query.limit || '50'), 100)
     const cacheKey = `leaderboard:${limit}`
-    const cached = await redis.get(cacheKey)
+    const cached = cacheGet(cacheKey)
 
-    // Always compute caller's rank fresh (not cached per-user)
     const { rows: rankRows } = await db.query(
       'SELECT COUNT(*)+1 AS rank FROM users WHERE total_mined>(SELECT total_mined FROM users WHERE id=$1) AND is_banned=false',
       [req.user.id]
@@ -230,8 +226,7 @@ export default async function socialRoutes(app) {
     const yourRank = parseInt(rankRows[0].rank)
 
     if (cached) {
-      const parsed = JSON.parse(cached)
-      return reply.send({ ...parsed, yourRank })
+      return reply.send({ ...JSON.parse(cached), yourRank })
     }
 
     const { rows } = await db.query(
@@ -246,7 +241,7 @@ export default async function socialRoutes(app) {
       blocks_found: u.blocks_found,
       isYou: u.id === req.user.id,
     }))}
-    await redis.setEx(cacheKey, 60, JSON.stringify(result))
+    cacheSet(cacheKey, JSON.stringify(result), 60)  // cache for 60s
     return reply.send({ ...result, yourRank })
   })
 
@@ -289,13 +284,12 @@ export default async function socialRoutes(app) {
     const { address } = req.body
     if (!address || !/^[A-Za-z0-9_-]{48}$/.test(address))
       return reply.code(400).send({ error: 'Invalid TON address' })
-    // Wallet bonus
     const alreadyLinked = !!req.user.wallet_address
     await db.query('UPDATE users SET wallet_address=$2 WHERE id=$1', [req.user.id, address])
     if (!alreadyLinked) {
       await db.query(
         'UPDATE users SET balance=balance+$2 WHERE id=$1',
-        [req.user.id, 10000 * 10000]  // 10,000 FRG
+        [req.user.id, 10000 * 10000]
       )
     }
     return reply.send({ ok: true, bonus: alreadyLinked ? 0 : 10000 })
@@ -304,7 +298,7 @@ export default async function socialRoutes(app) {
   app.get('/api/wallet', { preHandler: telegramAuth }, async (req, reply) => {
     return reply.send({
       wallet: req.user.wallet_address,
-      bonusClaimed: !!req.user.wallet_address   // true if they've ever linked a wallet (bonus already granted)
+      bonusClaimed: !!req.user.wallet_address
     })
   })
 
