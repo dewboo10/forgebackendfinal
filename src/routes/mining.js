@@ -64,13 +64,43 @@ export default async function miningRoutes(app) {
   })
 
   // POST /api/mining/heartbeat — client pings every 20s while open
-  app.post('/api/mining/heartbeat', { preHandler: telegramAuth }, async (req, reply) => {
-    await db.query(
-      'UPDATE users SET last_heartbeat=NOW(), last_seen=NOW() WHERE id=$1',
-      [req.user.id]
-    )
+app.post('/api/mining/heartbeat', { preHandler: telegramAuth }, async (req, reply) => {
+  try {
+    const { rows } = await db.query('SELECT * FROM users WHERE id=$1', [req.user.id])
+    const user = rows[0]
+    
+    if (user.mining_start) {
+      // Calculate and save pending earnings every heartbeat
+      const halvingMult = await getHalvingMultiplier()
+      const upgrades = await getUserUpgrades(user.id)
+      const earned = await calcPendingEarnings(user, upgrades, halvingMult)
+      
+      if (earned > 0) {
+        await db.tx(async (client) => {
+          await applyEarnings(client, user.id, earned)
+          if (user.referred_by) {
+            await payReferralCommission(client, earned, user.referred_by)
+          }
+        })
+        // Restart mining timer from now
+        await db.query(
+          'UPDATE users SET mining_start=NOW(), last_heartbeat=NOW(), last_seen=NOW() WHERE id=$1',
+          [user.id]
+        )
+      } else {
+        await db.query(
+          'UPDATE users SET last_heartbeat=NOW(), last_seen=NOW() WHERE id=$1',
+          [req.user.id]
+        )
+      }
+    }
+    
     return reply.send({ ok: true })
-  })
+  } catch(e) {
+    // Silent fail — heartbeat should never crash the app
+    return reply.send({ ok: true })
+  }
+})
 
   // POST /api/mining/claim-offline — claim automine earnings after being away
   app.post('/api/mining/claim-offline', { preHandler: telegramAuth }, async (req, reply) => {
