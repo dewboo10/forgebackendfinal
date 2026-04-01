@@ -21,21 +21,15 @@ async function runAutomine() {
       try {
         const halvingMult = await getHalvingMultiplier()
         const upgrades = await getUserUpgrades(user.id)
+        const rate = await calcRate(user, upgrades, halvingMult)
         const earnedPerInterval = await calcIntervalEarnings(user, upgrades, halvingMult, interval)
         if (earnedPerInterval <= 0) continue
+        const refPct = parseFloat(await getConfig('referral_percent') || '0.1')
 
         await db.tx(async (client) => {
-          const earnedInt = Math.floor(earnedPerInterval * 10000)
-          await client.query(
-            `UPDATE users SET
-               balance      = balance + $2,
-               total_mined  = total_mined + $2,
-               last_heartbeat = NOW()
-             WHERE id = $1`,
-            [user.id, earnedInt]
-          )
+          await applyEarnings(client, user.id, earnedPerInterval, rate)
           if (user.referred_by) {
-            await payReferralCommission(client, earnedPerInterval, user.referred_by)
+            await payReferralCommission(client, earnedPerInterval, user.referred_by, refPct)
           }
         })
       } catch (e) {
@@ -102,10 +96,12 @@ async function runHeartbeatCleanup() {
       try {
         const halvingMult = await getHalvingMultiplier()
         const upgrades = await getUserUpgrades(user.id)
+        const rate = await calcRate(user, upgrades, halvingMult)
         const earned = await calcPendingEarnings(user, upgrades, halvingMult)
+        const refPct = parseFloat(await getConfig('referral_percent') || '0.1')
         await db.tx(async (client) => {
-          await applyEarnings(client, user.id, earned)
-          if (user.referred_by) await payReferralCommission(client, earned, user.referred_by)
+          await applyEarnings(client, user.id, earned, rate)
+          if (user.referred_by) await payReferralCommission(client, earned, user.referred_by, refPct)
         })
       } catch (e) {
         console.error(`[cleanup] Error for user ${user.id}:`, e.message)
