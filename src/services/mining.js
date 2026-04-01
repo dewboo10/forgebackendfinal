@@ -105,14 +105,31 @@ export async function applyEarnings(client, userId, earnedFrg) {
     [userId, earnedInt]
   )
   // Update blocks_found: roughly 1 block per 1000 FRG
-  const blocks = Math.floor(earnedFrg / 1000)
-  if (blocks > 0) {
-    await client.query('UPDATE users SET blocks_found=blocks_found+$2 WHERE id=$1', [userId, blocks])
-  }
-  return {
-    balance: rows[0].balance / 10000,
-    total_mined: rows[0].total_mined / 10000
-  }
+  // const blocks = Math.floor(earnedFrg / 1000)
+  // if (blocks > 0) {
+  //   await client.query('UPDATE users SET blocks_found=blocks_found+$2 WHERE id=$1', [userId, blocks])
+  // }
+  // return {
+  //   balance: rows[0].balance / 10000,
+  //   total_mined: rows[0].total_mined / 10000
+  // }
+  // Block chance: ~1 block per ~10 minutes of mining
+const secondsMined = earnedFrg / 0.1
+const blockChance = Math.min(secondsMined / 625, 1)
+const blocksEarned = Math.random() < blockChance ? 1 : 0
+
+if (blocksEarned > 0) {
+  await client.query(
+    'UPDATE users SET blocks_found=blocks_found+$2 WHERE id=$1',
+    [userId, blocksEarned]
+  )
+}
+
+return {
+  balance:     rows[0].balance / 10000,
+  total_mined: rows[0].total_mined / 10000,
+  blocks_found: blocksEarned,
+}
 }
 
 // ─── Upgrade cost at a given level ────────────────────────────────────────────
