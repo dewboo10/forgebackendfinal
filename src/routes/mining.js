@@ -3,7 +3,6 @@ import { telegramAuth } from '../middleware/auth.js'
 import { db, getConfig } from '../db/index.js'
 import {
   getMiningState, calcPendingEarnings, applyEarnings,
-  saveHeartbeatEarnings,  // ← ADD THIS
   getUserUpgrades, calcRate, getHalvingMultiplier,
   UPGRADES, upgradeCost, payReferralCommission
 } from '../services/mining.js'
@@ -71,39 +70,38 @@ app.post('/api/mining/heartbeat', { preHandler: telegramAuth }, async (req, repl
   try {
     const { rows } = await db.query('SELECT * FROM users WHERE id=$1', [req.user.id])
     const user = rows[0]
-
+    
     if (user.mining_start) {
+      // Calculate and save pending earnings every heartbeat
       const halvingMult = await getHalvingMultiplier()
       const upgrades = await getUserUpgrades(user.id)
+      const rate = await calcRate(user, upgrades, halvingMult)
       const earned = await calcPendingEarnings(user, upgrades, halvingMult)
-
+      
       if (earned > 0) {
         const refPct = parseFloat(await getConfig('referral_percent') || '0.1')
         await db.tx(async (client) => {
-          // Use saveHeartbeatEarnings NOT applyEarnings
-          // applyEarnings clears mining_start which would stop mining!
-          await saveHeartbeatEarnings(client, user.id, earned)
+          await applyEarnings(client, user.id, earned, rate)
           if (user.referred_by) {
             await payReferralCommission(client, earned, user.referred_by, refPct)
           }
+          // Restart mining atomically
+          await client.query(
+            'UPDATE users SET mining_start=NOW(), last_heartbeat=NOW(), last_seen=NOW() WHERE id=$1',
+            [user.id]
+          )
         })
-        // Reset mining_start to NOW so next heartbeat only calculates new earnings
-        await db.query(
-          'UPDATE users SET mining_start=NOW() WHERE id=$1',
-          [user.id]
-        )
       } else {
-        // Just update heartbeat timestamp
         await db.query(
           'UPDATE users SET last_heartbeat=NOW(), last_seen=NOW() WHERE id=$1',
           [req.user.id]
         )
       }
     }
-
+    
     return reply.send({ ok: true })
   } catch(e) {
-    console.error('Heartbeat error:', e)
+    // Silent fail — heartbeat should never crash the app
     return reply.send({ ok: true })
   }
 })
