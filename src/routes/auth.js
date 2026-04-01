@@ -92,8 +92,8 @@ export default async function authRoutes(app) {
           )
           await client.query(
             `INSERT INTO notifications (user_id, type, title, body)
-             VALUES ($1,'referral','New recruit joined!','${tgUser.first_name} joined using your link. +10% of all their mining goes to you.')`,
-            [referrerId]
+             VALUES ($1,'referral','New recruit joined!',$2)`,
+            [referrerId, `${tgUser.first_name} joined using your link. +10% of all their mining goes to you.`]
           )
         }
       }

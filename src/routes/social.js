@@ -91,10 +91,11 @@ export default async function socialRoutes(app) {
       return reply.code(400).send({ error: 'Not enough referrals' })
 
     return await db.tx(async (client) => {
-      await client.query(
-        `INSERT INTO ref_tier_claims (user_id, tier_refs) VALUES ($1,$2)`,
+      const { rowCount } = await client.query(
+        `INSERT INTO ref_tier_claims (user_id, tier_refs) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
         [req.user.id, refs]
       )
+      if (rowCount === 0) return reply.code(400).send({ error: 'Already claimed' })
       await client.query(
         'UPDATE users SET balance=balance+$2 WHERE id=$1',
         [req.user.id, tier.frg * 10000]
@@ -148,9 +149,8 @@ export default async function socialRoutes(app) {
       [req.user.id, telegramId]
     )
     await db.query(
-      `INSERT INTO notifications (user_id, type, title, body) VALUES ($1,'system','Circle Invite',
-       '${req.user.first_name || 'Someone'} invited you to their Security Circle.')`,
-      [telegramId]
+      `INSERT INTO notifications (user_id, type, title, body) VALUES ($1,'system','Circle Invite',$2)`,
+      [telegramId, `${req.user.first_name || 'Someone'} invited you to their Security Circle.`]
     )
     return reply.send({ ok: true })
   })
@@ -352,10 +352,11 @@ export default async function socialRoutes(app) {
       }
       if (progress[mission.key] < cp)
         return reply.code(400).send({ error: 'Not reached yet' })
-      await client.query(
-        `INSERT INTO mission_claims (user_id, mission_id, checkpoint_index) VALUES ($1,$2,$3)`,
+      const { rowCount } = await client.query(
+        `INSERT INTO mission_claims (user_id, mission_id, checkpoint_index) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
         [u.id, missionId, checkpointIndex]
       )
+      if (rowCount === 0) return reply.code(400).send({ error: 'Already claimed' })
       const reward = mission.rewards[checkpointIndex]
       await client.query(
         'UPDATE users SET balance=balance+$2 WHERE id=$1', [u.id, reward * 10000]

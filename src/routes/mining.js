@@ -1,6 +1,6 @@
 // src/routes/mining.js
 import { telegramAuth } from '../middleware/auth.js'
-import { db } from '../db/index.js'
+import { db, getConfig } from '../db/index.js'
 import {
   getMiningState, calcPendingEarnings, applyEarnings,
   getUserUpgrades, calcRate, getHalvingMultiplier,
@@ -47,13 +47,15 @@ export default async function miningRoutes(app) {
 
       const halvingMult = await getHalvingMultiplier()
       const upgrades = await getUserUpgrades(user.id)
+      const rate = await calcRate(user, upgrades, halvingMult)
       const earned = await calcPendingEarnings(user, upgrades, halvingMult)
 
       return await db.tx(async (client) => {
-        const result = await applyEarnings(client, user.id, earned)
+        const result = await applyEarnings(client, user.id, earned, rate)
         // Pay referral commission
         if (user.referred_by) {
-          await payReferralCommission(client, earned, user.referred_by)
+          const refPct = parseFloat(await getConfig('referral_percent') || '0.1')
+          await payReferralCommission(client, earned, user.referred_by, refPct)
         }
         return reply.send({ ok: true, earned, ...result })
       })
@@ -73,20 +75,22 @@ app.post('/api/mining/heartbeat', { preHandler: telegramAuth }, async (req, repl
       // Calculate and save pending earnings every heartbeat
       const halvingMult = await getHalvingMultiplier()
       const upgrades = await getUserUpgrades(user.id)
+      const rate = await calcRate(user, upgrades, halvingMult)
       const earned = await calcPendingEarnings(user, upgrades, halvingMult)
       
       if (earned > 0) {
+        const refPct = parseFloat(await getConfig('referral_percent') || '0.1')
         await db.tx(async (client) => {
-          await applyEarnings(client, user.id, earned)
+          await applyEarnings(client, user.id, earned, rate)
           if (user.referred_by) {
-            await payReferralCommission(client, earned, user.referred_by)
+            await payReferralCommission(client, earned, user.referred_by, refPct)
           }
+          // Restart mining atomically
+          await client.query(
+            'UPDATE users SET mining_start=NOW(), last_heartbeat=NOW(), last_seen=NOW() WHERE id=$1',
+            [user.id]
+          )
         })
-        // Restart mining timer from now
-        await db.query(
-          'UPDATE users SET mining_start=NOW(), last_heartbeat=NOW(), last_seen=NOW() WHERE id=$1',
-          [user.id]
-        )
       } else {
         await db.query(
           'UPDATE users SET last_heartbeat=NOW(), last_seen=NOW() WHERE id=$1',
@@ -114,16 +118,20 @@ app.post('/api/mining/heartbeat', { preHandler: telegramAuth }, async (req, repl
 
     const halvingMult = await getHalvingMultiplier()
     const upgrades = await getUserUpgrades(user.id)
+    const rate = await calcRate(user, upgrades, halvingMult)
     const earned = await calcPendingEarnings(user, upgrades, halvingMult)
 
     return await db.tx(async (client) => {
-      const result = await applyEarnings(client, user.id, earned)
+      const result = await applyEarnings(client, user.id, earned, rate)
       // Restart mining from now
       await client.query(
         'UPDATE users SET mining_start=NOW(), last_heartbeat=NOW() WHERE id=$1',
         [user.id]
       )
-      if (user.referred_by) await payReferralCommission(client, earned, user.referred_by)
+      if (user.referred_by) {
+        const refPct = parseFloat(await getConfig('referral_percent') || '0.1')
+        await payReferralCommission(client, earned, user.referred_by, refPct)
+      }
       return reply.send({ ok: true, earned, ...result })
     })
   })

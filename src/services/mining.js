@@ -92,7 +92,7 @@ export async function calcPendingEarnings(user, upgradeLevels, halvingMult, boos
 }
 
 // ─── Apply earnings to DB — returns new balance ───────────────────────────────
-export async function applyEarnings(client, userId, earnedFrg) {
+export async function applyEarnings(client, userId, earnedFrg, rate = 0.1) {
   const earnedInt = Math.floor(earnedFrg * 10000)
   const { rows } = await client.query(
     `UPDATE users
@@ -104,50 +104,23 @@ export async function applyEarnings(client, userId, earnedFrg) {
      RETURNING balance, total_mined`,
     [userId, earnedInt]
   )
-  // Update blocks_found: roughly 1 block per 1000 FRG
-  // const blocks = Math.floor(earnedFrg / 1000)
-  // if (blocks > 0) {
-  //   await client.query('UPDATE users SET blocks_found=blocks_found+$2 WHERE id=$1', [userId, blocks])
-  // }
-  // return {
-  //   balance: rows[0].balance / 10000,
-  //   total_mined: rows[0].total_mined / 10000
-  // }
-  // Block chance: ~1 block per ~10 minutes of mining
-// const secondsMined = earnedFrg / 0.1
-// const blockChance = Math.min(secondsMined / 625, 1)
-// const blocksEarned = Math.random() < blockChance ? 1 : 0
+  // Block chance based on seconds mined
+  const secondsMined = earnedFrg > 0 ? earnedFrg / Math.max(rate, 0.1) : 0
+  const blockChance = Math.min(secondsMined / 625, 0.95)
+  const blocksEarned = Math.random() < blockChance ? 1 : 0
 
-// if (blocksEarned > 0) {
-//   await client.query(
-//     'UPDATE users SET blocks_found=blocks_found+$2 WHERE id=$1',
-//     [userId, blocksEarned]
-//   )
-// }
+  if (blocksEarned > 0) {
+    await client.query(
+      'UPDATE users SET blocks_found=blocks_found+$2 WHERE id=$1',
+      [userId, blocksEarned]
+    )
+  }
 
-// return {
-//   balance:     rows[0].balance / 10000,
-//   total_mined: rows[0].total_mined / 10000,
-//   blocks_found: blocksEarned,
-// }
-// Block chance based on seconds mined
-const rate = rows[0] ? (await calcRate({speed_perm: false}, {}, 1)) : 0.1
-const secondsMined = earnedFrg > 0 ? earnedFrg / Math.max(rate, 0.1) : 0
-const blockChance = Math.min(secondsMined / 625, 0.95)
-const blocksEarned = Math.random() < blockChance ? 1 : 0
-
-if (blocksEarned > 0) {
-  await client.query(
-    'UPDATE users SET blocks_found=blocks_found+$2 WHERE id=$1',
-    [userId, blocksEarned]
-  )
-}
-
-return {
-  balance:      rows[0].balance / 10000,
-  total_mined:  rows[0].total_mined / 10000,
-  blocks_found: blocksEarned,
-}
+  return {
+    balance:      rows[0].balance / 10000,
+    total_mined:  rows[0].total_mined / 10000,
+    blocks_found: blocksEarned,
+  }
 }
 
 // ─── Upgrade cost at a given level ────────────────────────────────────────────
@@ -156,10 +129,8 @@ export function upgradeCost(upgrade, currentLevel) {
 }
 
 // ─── Pay referral commission ──────────────────────────────────────────────────
-export async function payReferralCommission(client, earnedFrg, referrerId) {
+export async function payReferralCommission(client, earnedFrg, referrerId, pct) {
   if (!referrerId || earnedFrg <= 0) return
-  const pctStr = await getConfig('referral_percent')
-  const pct = parseFloat(pctStr || '0.1')
   const commission = Math.floor(earnedFrg * pct * 10000)
   if (commission <= 0) return
   await client.query(
