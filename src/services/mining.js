@@ -114,8 +114,26 @@ export async function applyEarnings(client, userId, earnedFrg) {
   //   total_mined: rows[0].total_mined / 10000
   // }
   // Block chance: ~1 block per ~10 minutes of mining
-const secondsMined = earnedFrg / 0.1
-const blockChance = Math.min(secondsMined / 625, 1)
+// const secondsMined = earnedFrg / 0.1
+// const blockChance = Math.min(secondsMined / 625, 1)
+// const blocksEarned = Math.random() < blockChance ? 1 : 0
+
+// if (blocksEarned > 0) {
+//   await client.query(
+//     'UPDATE users SET blocks_found=blocks_found+$2 WHERE id=$1',
+//     [userId, blocksEarned]
+//   )
+// }
+
+// return {
+//   balance:     rows[0].balance / 10000,
+//   total_mined: rows[0].total_mined / 10000,
+//   blocks_found: blocksEarned,
+// }
+// Block chance based on seconds mined
+const rate = rows[0] ? (await calcRate({speed_perm: false}, {}, 1)) : 0.1
+const secondsMined = earnedFrg > 0 ? earnedFrg / Math.max(rate, 0.1) : 0
+const blockChance = Math.min(secondsMined / 625, 0.95)
 const blocksEarned = Math.random() < blockChance ? 1 : 0
 
 if (blocksEarned > 0) {
@@ -126,8 +144,8 @@ if (blocksEarned > 0) {
 }
 
 return {
-  balance:     rows[0].balance / 10000,
-  total_mined: rows[0].total_mined / 10000,
+  balance:      rows[0].balance / 10000,
+  total_mined:  rows[0].total_mined / 10000,
   blocks_found: blocksEarned,
 }
 }

@@ -115,6 +115,7 @@ export default async function authRoutes(app) {
 //     is_admin:   u.is_admin,
 //   }
 // }
+
 function sanitizeUser(u) {
   return {
     id:                u.id,
