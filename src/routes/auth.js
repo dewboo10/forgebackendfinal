@@ -106,12 +106,32 @@ export default async function authRoutes(app) {
   })
 }
 
+// function sanitizeUser(u) {
+//   return {
+//     id:         u.id,
+//     username:   u.username,
+//     first_name: u.first_name,
+//     ref_code:   u.ref_code,
+//     is_admin:   u.is_admin,
+//   }
+// }
 function sanitizeUser(u) {
   return {
-    id:         u.id,
-    username:   u.username,
-    first_name: u.first_name,
-    ref_code:   u.ref_code,
-    is_admin:   u.is_admin,
+    id:                u.id,
+    username:          u.username,
+    first_name:        u.first_name,
+    ref_code:          u.ref_code,
+    is_admin:          u.is_admin,
+    balance:           u.balance / 10000,
+    totalMined:        u.total_mined / 10000,
+    blocks_found:      u.blocks_found,
+    mining_start:      u.mining_start,
+    automine_until:    u.automine_until,
+    automine_lifetime: u.automine_lifetime,
+    speed_perm:        u.speed_perm,
+    daily_streak:      u.daily_streak,
+    daily_claimed_at:  u.daily_claimed_at,
+    wallet_address:    u.wallet_address,
+    miningStartedAt:   u.mining_start,
   }
 }
