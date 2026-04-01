@@ -92,7 +92,7 @@ export async function calcPendingEarnings(user, upgradeLevels, halvingMult, boos
 }
 
 // ─── Apply earnings to DB — returns new balance ───────────────────────────────
-export async function applyEarnings(client, userId, earnedFrg, rate = 0.1) {
+export async function applyEarnings(client, userId, earnedFrg) {
   const earnedInt = Math.floor(earnedFrg * 10000)
   const { rows } = await client.query(
     `UPDATE users
@@ -104,14 +104,15 @@ export async function applyEarnings(client, userId, earnedFrg, rate = 0.1) {
      RETURNING balance, total_mined`,
     [userId, earnedInt]
   )
-  // Block chance based on seconds mined
-  const secondsMined = earnedFrg > 0 ? earnedFrg / Math.max(rate, 0.1) : 0
+
+  // Block chance: ~1 block per ~10 mins of mining
+  const secondsMined = earnedFrg > 0 ? earnedFrg / 0.1 : 0
   const blockChance = Math.min(secondsMined / 625, 0.95)
   const blocksEarned = Math.random() < blockChance ? 1 : 0
 
   if (blocksEarned > 0) {
     await client.query(
-      'UPDATE users SET blocks_found=blocks_found+$2 WHERE id=$1',
+      'UPDATE users SET blocks_found = blocks_found + $2 WHERE id = $1',
       [userId, blocksEarned]
     )
   }
@@ -120,6 +121,34 @@ export async function applyEarnings(client, userId, earnedFrg, rate = 0.1) {
     balance:      rows[0].balance / 10000,
     total_mined:  rows[0].total_mined / 10000,
     blocks_found: blocksEarned,
+  }
+}
+
+// ─── Save earnings on heartbeat WITHOUT stopping mining ───────────────────
+export async function saveHeartbeatEarnings(client, userId, earnedFrg) {
+  const earnedInt = Math.floor(earnedFrg * 10000)
+  if (earnedInt <= 0) return
+
+  const secondsMined = earnedFrg / 0.1
+  const blockChance = Math.min(secondsMined / 625, 0.95)
+  const blocksEarned = Math.random() < blockChance ? 1 : 0
+
+  // Save balance + total_mined but keep mining_start active
+  await client.query(
+    `UPDATE users
+     SET balance     = balance + $2,
+         total_mined = total_mined + $2,
+         last_heartbeat = NOW(),
+         last_seen   = NOW()
+     WHERE id = $1`,
+    [userId, earnedInt]
+  )
+
+  if (blocksEarned > 0) {
+    await client.query(
+      'UPDATE users SET blocks_found = blocks_found + $2 WHERE id = $1',
+      [userId, blocksEarned]
+    )
   }
 }
 
