@@ -1,6 +1,6 @@
 // src/jobs/index.js — Background workers (no Redis / BullMQ)
 import { db, getConfig, getTotalUsers, cacheDel } from '../db/index.js'
-import { getHalvingMultiplier, getUserUpgrades, calcPendingEarnings, applyEarnings, payReferralCommission } from '../services/mining.js'
+import { getHalvingMultiplier, getUserUpgrades, calcPendingEarnings, applyEarnings, payReferralCommission , calcRate } from '../services/mining.js'
 
 // ─── Automine Worker — runs every 5 min, credits all automine users ───────────
 async function runAutomine() {
