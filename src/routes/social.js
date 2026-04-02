@@ -1,6 +1,11 @@
 // src/routes/social.js — referrals, circle, profile, leaderboard, daily, wallet, notifications
 import { telegramAuth } from '../middleware/auth.js'
 import { db, getConfig, getTotalUsers, cacheGet, cacheSet } from '../db/index.js'
+// FIX: Import calcRate + getUserUpgrades so mission m4 (rate) checks
+// the effective rate (base + upgrades + halving) rather than u.base_rate
+// which is always 0.1 and never changes, making rate-based milestones
+// impossible to reach for most users.
+import { calcRate, getUserUpgrades, getHalvingMultiplier } from '../services/mining.js'
 
 const REF_TIERS = [
   { refs: 1,   rewardType: 'speed',     frg: 5000,    days: 1,  label: 'First Blood' },
@@ -241,7 +246,7 @@ export default async function socialRoutes(app) {
       blocks_found: u.blocks_found,
       isYou: u.id === req.user.id,
     }))}
-    cacheSet(cacheKey, JSON.stringify(result), 60)  // cache for 60s
+    cacheSet(cacheKey, JSON.stringify(result), 60)
     return reply.send({ ...result, yourRank })
   })
 
@@ -304,21 +309,32 @@ export default async function socialRoutes(app) {
 
   // ─── MISSIONS ───────────────────────────────────────────────────────────────
 
+  // FIX: Both GET and POST now calculate the effective mining rate (base + upgrades
+  // + halving) for mission m4 progress. The old code used u.base_rate which is
+  // always 0.1, making the rate-based checkpoints (1/s, 5/s, 20/s, 50/s) impossible
+  // to unlock because no user's base_rate column ever updates.
+
   app.get('/api/missions', { preHandler: telegramAuth }, async (req, reply) => {
-    const { rows: user } = await db.query('SELECT * FROM users WHERE id=$1', [req.user.id])
-    const u = user[0]
+    const { rows: userRows } = await db.query('SELECT * FROM users WHERE id=$1', [req.user.id])
+    const u = userRows[0]
     const { rows: refCount } = await db.query(
       'SELECT COUNT(*) FROM referrals WHERE referrer_id=$1', [u.id]
     )
     const { rows: claimed } = await db.query(
       'SELECT mission_id, checkpoint_index FROM mission_claims WHERE user_id=$1', [u.id]
     )
+
+    // Calculate actual effective rate including upgrades
+    const halvingMult = await getHalvingMultiplier()
+    const upgradeLevels = await getUserUpgrades(u.id)
+    const effectiveRate = await calcRate(u, upgradeLevels, halvingMult)
+
     const claimedSet = new Set(claimed.map(c => `${c.mission_id}:${c.checkpoint_index}`))
     const progress = {
-      total_mined: u.total_mined / 10000,
+      total_mined:  u.total_mined / 10000,
       blocks_found: u.blocks_found,
-      ref_count: parseInt(refCount[0].count),
-      rate: parseFloat((u.base_rate || 0.1).toFixed(4))
+      ref_count:    parseInt(refCount[0].count),
+      rate:         effectiveRate,  // FIX: was u.base_rate (always 0.1)
     }
     return reply.send({ missions: MISSIONS.map(m => ({
       ...m,
@@ -344,24 +360,34 @@ export default async function socialRoutes(app) {
       const { rows: refRows } = await client.query(
         'SELECT COUNT(*) FROM referrals WHERE referrer_id=$1', [u.id]
       )
+
+      // Calculate actual effective rate for m4 validation
+      const halvingMult = await getHalvingMultiplier()
+      const upgradeLevels = await getUserUpgrades(u.id)
+      const effectiveRate = await calcRate(u, upgradeLevels, halvingMult)
+
       const progress = {
-        total_mined: u.total_mined / 10000,
+        total_mined:  u.total_mined / 10000,
         blocks_found: u.blocks_found,
-        ref_count: parseInt(refRows[0].count),
-        rate: u.base_rate
+        ref_count:    parseInt(refRows[0].count),
+        rate:         effectiveRate,  // FIX: was u.base_rate (always 0.1)
       }
+
       if (progress[mission.key] < cp)
         return reply.code(400).send({ error: 'Not reached yet' })
+
       const { rowCount } = await client.query(
         `INSERT INTO mission_claims (user_id, mission_id, checkpoint_index) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
         [u.id, missionId, checkpointIndex]
       )
       if (rowCount === 0) return reply.code(400).send({ error: 'Already claimed' })
+
       const reward = mission.rewards[checkpointIndex]
-      await client.query(
-        'UPDATE users SET balance=balance+$2 WHERE id=$1', [u.id, reward * 10000]
+      const { rows: updated } = await client.query(
+        'UPDATE users SET balance=balance+$2 WHERE id=$1 RETURNING balance',
+        [u.id, reward * 10000]
       )
-      return reply.send({ ok: true, reward })
+      return reply.send({ ok: true, reward, newBalance: updated[0].balance / 10000 })
     })
   })
 

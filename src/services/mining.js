@@ -91,7 +91,10 @@ export async function calcPendingEarnings(user, upgradeLevels, halvingMult, boos
   return parseFloat(earned.toFixed(4))
 }
 
-// ─── Apply earnings to DB — returns new balance ───────────────────────────────
+// ─── Apply earnings to DB — returns new balance + TOTAL blocks_found ──────────
+// FIX: Previously returned blocks_found as the increment (0 or 1), not the total.
+// The frontend was doing setBlocks(res.blocks_found) which overwrote the total with
+// just 0 or 1. Now we always UPDATE...RETURNING to get the real accumulated total.
 export async function applyEarnings(client, userId, earnedFrg, rate = 0.1) {
   const earnedInt = Math.floor(earnedFrg * 10000)
   const { rows } = await client.query(
@@ -104,22 +107,24 @@ export async function applyEarnings(client, userId, earnedFrg, rate = 0.1) {
      RETURNING balance, total_mined`,
     [userId, earnedInt]
   )
+
   // Block chance based on seconds mined
   const secondsMined = earnedFrg > 0 ? earnedFrg / Math.max(rate, 0.1) : 0
   const blockChance = Math.min(secondsMined / 625, 0.95)
   const blocksEarned = Math.random() < blockChance ? 1 : 0
 
-  if (blocksEarned > 0) {
-    await client.query(
-      'UPDATE users SET blocks_found=blocks_found+$2 WHERE id=$1',
-      [userId, blocksEarned]
-    )
-  }
+  // FIX: Always use UPDATE...RETURNING to get the true total blocks_found.
+  // Previously used a bare UPDATE (no RETURNING) and returned just the increment,
+  // causing the frontend to replace the block total with 0 or 1.
+  const { rows: blockRows } = await client.query(
+    'UPDATE users SET blocks_found = blocks_found + $2 WHERE id = $1 RETURNING blocks_found',
+    [userId, blocksEarned]
+  )
 
   return {
     balance:      rows[0].balance / 10000,
     total_mined:  rows[0].total_mined / 10000,
-    blocks_found: blocksEarned,
+    blocks_found: blockRows[0].blocks_found,  // ← TOTAL, not increment
   }
 }
 
@@ -140,6 +145,9 @@ export async function payReferralCommission(client, earnedFrg, referrerId, pct) 
 }
 
 // ─── Full mining state snapshot for a user ────────────────────────────────────
+// FIX: Renamed 'upgrade_levels' → 'upgrades' so the frontend key lookup
+// (state.upgrades) resolves correctly. Also added 'totalMined' camelCase alias
+// since the frontend reads state.totalMined in several places.
 export async function getMiningState(user) {
   const halvingMult = await getHalvingMultiplier()
   const upgradeLevels = await getUserUpgrades(user.id)
@@ -149,23 +157,24 @@ export async function getMiningState(user) {
     (user.automine_until && new Date(user.automine_until) > new Date())
 
   return {
-    balance:         user.balance / 10000,
-    total_mined:     user.total_mined / 10000,
-    blocks_found:    user.blocks_found,
+    balance:           user.balance / 10000,
+    total_mined:       user.total_mined / 10000,
+    totalMined:        user.total_mined / 10000,  // camelCase alias for frontend
+    blocks_found:      user.blocks_found,
     rate,
     pending,
-    mining:          !!user.mining_start,
-    mining_start:    user.mining_start,
-    has_automine:    hasAutomine,
-    automine_until:  user.automine_until,
+    mining:            !!user.mining_start,
+    mining_start:      user.mining_start,
+    has_automine:      hasAutomine,
+    automine_until:    user.automine_until,
     automine_lifetime: user.automine_lifetime,
-    speed_perm:      user.speed_perm,
-    upgrade_levels:  upgradeLevels,
-    halving_mult:    halvingMult,
+    speed_perm:        user.speed_perm,
+    upgrades:          upgradeLevels,  // FIX: was 'upgrade_levels', frontend reads 'upgrades'
+    halving_mult:      halvingMult,
     boost: user.boost_active && user.boost_until && new Date(user.boost_until) > new Date()
       ? { type: user.boost_active, until: user.boost_until }
       : null,
-    boost_charges:   user.boost_charges,
-    turbo_charges:   user.turbo_charges,
+    boost_charges:  user.boost_charges,
+    turbo_charges:  user.turbo_charges,
   }
 }

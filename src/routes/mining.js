@@ -13,10 +13,9 @@ export default async function miningRoutes(app) {
   app.get('/api/mining/state', { preHandler: telegramAuth }, async (req, reply) => {
     try {
       const { rows } = await db.query('SELECT * FROM users WHERE id=$1', [req.user.id])
+      // getMiningState now returns all fields with correct keys including
+      // 'upgrades' (not 'upgrade_levels') and 'totalMined' alias
       const state = await getMiningState(rows[0])
-      // Include authoritative balance so frontend can sync
-      state.balance = rows[0].balance / 10000
-      state.totalMined = rows[0].total_mined / 10000
       return reply.send(state)
     } catch (e) {
       console.error('Mining state error:', e)
@@ -30,7 +29,6 @@ export default async function miningRoutes(app) {
 
     if (user.mining_start) return reply.send({ ok: true, already: true })
 
-    // Settle any previous pending (shouldn't be any, but safety)
     await db.query(
       `UPDATE users SET mining_start=NOW(), last_heartbeat=NOW() WHERE id=$1`,
       [user.id]
@@ -51,8 +49,8 @@ export default async function miningRoutes(app) {
       const earned = await calcPendingEarnings(user, upgrades, halvingMult)
 
       return await db.tx(async (client) => {
+        // applyEarnings now returns total blocks_found (not just the increment)
         const result = await applyEarnings(client, user.id, earned, rate)
-        // Pay referral commission
         if (user.referred_by) {
           const refPct = parseFloat(await getConfig('referral_percent') || '0.1')
           await payReferralCommission(client, earned, user.referred_by, refPct)
@@ -66,45 +64,60 @@ export default async function miningRoutes(app) {
   })
 
   // POST /api/mining/heartbeat — client pings every 20s while open
-app.post('/api/mining/heartbeat', { preHandler: telegramAuth }, async (req, reply) => {
-  try {
-    const { rows } = await db.query('SELECT * FROM users WHERE id=$1', [req.user.id])
-    const user = rows[0]
-    
-    if (user.mining_start) {
-      // Calculate and save pending earnings every heartbeat
+  // FIX: Now returns { ok, balance, blocks_found, mining_start } so the frontend
+  // can sync its local balance and reset the pending-earnings timer. Previously
+  // this returned only { ok: true }, causing frontend pendingEarnings to keep
+  // accumulating from the original session start even after the DB had already
+  // credited those earnings and reset mining_start to NOW().
+  app.post('/api/mining/heartbeat', { preHandler: telegramAuth }, async (req, reply) => {
+    try {
+      const { rows } = await db.query('SELECT * FROM users WHERE id=$1', [req.user.id])
+      const user = rows[0]
+
+      if (!user.mining_start) {
+        return reply.send({ ok: true })
+      }
+
       const halvingMult = await getHalvingMultiplier()
       const upgrades = await getUserUpgrades(user.id)
       const rate = await calcRate(user, upgrades, halvingMult)
       const earned = await calcPendingEarnings(user, upgrades, halvingMult)
-      
+
       if (earned > 0) {
         const refPct = parseFloat(await getConfig('referral_percent') || '0.1')
-        await db.tx(async (client) => {
-          await applyEarnings(client, user.id, earned, rate)
+        const result = await db.tx(async (client) => {
+          const r = await applyEarnings(client, user.id, earned, rate)
           if (user.referred_by) {
             await payReferralCommission(client, earned, user.referred_by, refPct)
           }
-          // Restart mining atomically
+          // Restart mining from now atomically in the same transaction
           await client.query(
             'UPDATE users SET mining_start=NOW(), last_heartbeat=NOW(), last_seen=NOW() WHERE id=$1',
             [user.id]
           )
+          return r
+        })
+        // Return the synced state so frontend can reset its pending-earnings counter
+        return reply.send({
+          ok: true,
+          balance:      result.balance,
+          total_mined:  result.total_mined,
+          blocks_found: result.blocks_found,  // total, not increment
+          mining_start: new Date(),            // the new cycle start
         })
       } else {
         await db.query(
           'UPDATE users SET last_heartbeat=NOW(), last_seen=NOW() WHERE id=$1',
           [req.user.id]
         )
+        return reply.send({ ok: true })
       }
+    } catch(e) {
+      // Silent fail — heartbeat should never crash the app
+      console.error('Heartbeat error:', e)
+      return reply.send({ ok: true })
     }
-    
-    return reply.send({ ok: true })
-  } catch(e) {
-    // Silent fail — heartbeat should never crash the app
-    return reply.send({ ok: true })
-  }
-})
+  })
 
   // POST /api/mining/claim-offline — claim automine earnings after being away
   app.post('/api/mining/claim-offline', { preHandler: telegramAuth }, async (req, reply) => {
