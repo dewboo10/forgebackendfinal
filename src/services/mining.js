@@ -110,7 +110,7 @@ export async function applyEarnings(client, userId, earnedFrg, rate = 0.1) {
 
   // Block chance based on seconds mined
   const secondsMined = earnedFrg > 0 ? earnedFrg / Math.max(rate, 0.1) : 0
-  const blockChance = Math.min(secondsMined / 625, 0.95)
+  const blockChance = Math.min(secondsMined / 150, 0.95)
   const blocksEarned = Math.random() < blockChance ? 1 : 0
 
   // FIX: Always use UPDATE...RETURNING to get the true total blocks_found.
