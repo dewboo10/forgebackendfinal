@@ -53,7 +53,7 @@ export default async function authRoutes(app) {
     const refCode = startParam.startsWith('ref_') ? startParam.slice(4) : null
 
     return await db.tx(async (client) => {
-      const { rows } = await client.query(
+   const { rows } = await client.query(
         `INSERT INTO users (id, username, first_name, last_name, photo_url, language_code)
          VALUES ($1,$2,$3,$4,$5,$6)
          ON CONFLICT (id) DO UPDATE SET
@@ -61,7 +61,7 @@ export default async function authRoutes(app) {
            first_name=EXCLUDED.first_name,
            last_name=EXCLUDED.last_name,
            last_seen=NOW()
-         RETURNING *`,
+         RETURNING *, (xmax = 0) AS is_new_user`,
         [tgUser.id, tgUser.username, tgUser.first_name, tgUser.last_name, tgUser.photo_url, tgUser.language_code]
       )
       let user = rows[0]
@@ -101,7 +101,7 @@ export default async function authRoutes(app) {
       // Invalidate user cache
       cacheDel(`user:${user.id}`)
 
-      return reply.send({ ok: true, user: sanitizeUser(user) })
+   return reply.send({ ok: true, user: sanitizeUser(user), isNewUser: rows[0].is_new_user })
     })
   })
 }
