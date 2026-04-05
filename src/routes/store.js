@@ -192,7 +192,15 @@ async function verifyTonTx(boc, expectedTon, recipientWallet) {
     )
     const tx = res.data
     // Check destination wallet and amount
-    const destMatch = tx.in_msg?.destination?.address === recipientWallet
+    // const destMatch = tx.in_msg?.destination?.address === recipientWallet
+
+    const normalize = addr => {
+  if (!addr) return ''
+  return addr.replace(/[^a-zA-Z0-9]/g, '').toLowerCase()
+}
+
+const destMatch = normalize(tx.in_msg?.destination?.address) === normalize(recipientWallet)
+
     const tonAmount = tx.in_msg?.value / 1e9
     const amountOk = tonAmount >= expectedTon * 0.99  // 1% tolerance
     if (!destMatch) return { ok: false, reason: 'Wrong destination' }
