@@ -110,9 +110,9 @@ export default async function storeRoutes(app) {
         )
         return reply.send({ ok: true })
       })
-    } catch (e) {
-      console.error('TON verify error:', e)
-      return reply.code(500).send({ error: 'Verification failed' })
+ } catch (e) {
+      console.error('TON verify error:', e.message, e.response?.data)
+      return reply.code(500).send({ error: 'Verification failed', detail: e.message })
     }
   })
 
