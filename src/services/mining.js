@@ -209,7 +209,9 @@ export async function getMiningState(user) {
     boost: user.boost_active && user.boost_until && new Date(user.boost_until) > new Date()
       ? { type: user.boost_active, until: user.boost_until }
       : null,
-    boost_charges:  user.boost_charges,
-    turbo_charges:  user.turbo_charges,
+    boost_charges:   user.boost_charges,
+    turbo_charges:   user.turbo_charges,
+    boost_surge_used: user.boost_surge_used,
+    boost_turbo_used: user.boost_turbo_used,
   }
 }
