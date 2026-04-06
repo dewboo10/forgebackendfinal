@@ -199,6 +199,15 @@ async function activateItem(client, userId, itemId, item) {
 
 // ─── Verify TON transaction via TonAPI ────────────────────────────────────────
 async function verifyTonTx(boc, expectedTon, recipientWallet) {
+  if (!recipientWallet) {
+    console.error('verifyTonTx failed: TON_WALLET is not configured')
+    return { ok: false, reason: 'No recipient wallet configured on backend' }
+  }
+  if (!process.env.TON_API_KEY) {
+    console.error('verifyTonTx failed: TON_API_KEY is not configured')
+    return { ok: false, reason: 'TON API key is not configured on backend' }
+  }
+
   try {
     const net = process.env.TON_NETWORK === 'testnet' ? 'testnet.' : ''
     const res = await axios.post(
