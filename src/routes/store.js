@@ -199,17 +199,19 @@ async function verifyTonTx(boc, expectedTon, recipientWallet) {
       { headers: { Authorization: `Bearer ${process.env.TON_API_KEY}` }, timeout: 10000 }
     )
     const tx = res.data
-    // Check destination wallet and amount
-    // const destMatch = tx.in_msg?.destination?.address === recipientWallet
-
+    // Check destination wallet and amount. For TON wallet transfers the outer message is often to the wallet contract,
+    // while the actual payment lives in tx.out_msgs[]. Use out_msgs first, fallback to in_msg if necessary.
     const normalize = addr => {
-  if (!addr) return ''
-  return addr.replace(/[^a-zA-Z0-9]/g, '').toLowerCase()
-}
+      if (!addr) return ''
+      return addr.replace(/[^a-zA-Z0-9]/g, '').toLowerCase()
+    }
 
-const destMatch = normalize(tx.in_msg?.destination?.address) === normalize(recipientWallet)
+    const paymentOut = Array.isArray(tx.out_msgs)
+      ? tx.out_msgs.find(msg => normalize(msg.destination?.address) === normalize(recipientWallet))
+      : null
 
-    const tonAmount = tx.in_msg?.value / 1e9
+    const destMatch = Boolean(paymentOut) || normalize(tx.in_msg?.destination?.address) === normalize(recipientWallet)
+    const tonAmount = paymentOut ? paymentOut.value / 1e9 : tx.in_msg?.value / 1e9
     const amountOk = tonAmount >= expectedTon * 0.99  // 1% tolerance
     if (!destMatch) return { ok: false, reason: 'Wrong destination' }
     if (!amountOk)  return { ok: false, reason: `Amount too low: ${tonAmount} < ${expectedTon}` }
