@@ -208,50 +208,82 @@ async function verifyTonTx(boc, expectedTon, recipientWallet) {
     return { ok: false, reason: 'TON API key is not configured on backend' }
   }
 
-  try {
-    const net = process.env.TON_NETWORK === 'testnet' ? 'testnet.' : ''
-    const res = await axios.post(
-      `https://${net}tonapi.io/v2/blockchain/message`,
-      { boc },
-      { headers: { Authorization: `Bearer ${process.env.TON_API_KEY}` }, timeout: 10000 }
-    )
-    const tx = res.data
-    // Check destination wallet and amount. For TON wallet transfers the outer message is often to the wallet contract,
-    // while the actual payment lives in tx.out_msgs[]. Use out_msgs first, fallback to in_msg if necessary.
-    const normalize = addr => {
-      if (!addr) return ''
-      return addr.replace(/[^a-zA-Z0-9]/g, '').toLowerCase()
-    }
-
-    const paymentOut = Array.isArray(tx.out_msgs)
-      ? tx.out_msgs.find(msg => normalize(msg.destination?.address) === normalize(recipientWallet))
-      : null
-
-    const matchedAddress = normalize(paymentOut?.destination?.address) || normalize(tx.in_msg?.destination?.address)
-    const tonAmount = paymentOut ? paymentOut.value / 1e9 : tx.in_msg?.value / 1e9
-    const amountOk = typeof tonAmount === 'number' && tonAmount >= expectedTon * 0.99  // 1% tolerance
-    const destMatch = Boolean(paymentOut) || matchedAddress === normalize(recipientWallet)
-
-    if (!destMatch) {
-      console.error('TonAPI verify mismatch: wrong destination', {
-        expected: normalize(recipientWallet),
-        actual: matchedAddress,
-        txType: paymentOut ? 'out_msg' : 'in_msg',
-        tx,
-      })
-      return { ok: false, reason: 'Wrong destination' }
-    }
-    if (!amountOk) {
-      console.error('TonAPI verify mismatch: wrong amount', {
-        expectedTon,
-        actualTon: tonAmount,
-        tx,
-      })
-      return { ok: false, reason: `Amount too low: ${tonAmount} < ${expectedTon}` }
-    }
-    return { ok: true }
-  } catch (e) {
-    console.error('TonAPI error:', e.response?.data || e.message)
-    return { ok: false, reason: e.response?.data?.error || e.message || 'API error' }
+  const normalize = addr => {
+    if (!addr) return ''
+    return addr.replace(/[^a-zA-Z0-9]/g, '').toLowerCase()
   }
+
+  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
+  const extractTx = raw => raw?.transaction ? raw.transaction : raw
+
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    try {
+      const net = process.env.TON_NETWORK === 'testnet' ? 'testnet.' : ''
+      const res = await axios.post(
+        `https://${net}tonapi.io/v2/blockchain/message`,
+        { boc },
+        { headers: { Authorization: `Bearer ${process.env.TON_API_KEY}` }, timeout: 10000 }
+      )
+
+      const raw = res.data
+      const tx = extractTx(raw)
+      const outMsgs = tx?.out_msgs ?? tx?.outMsgs ?? []
+      const inMsg = tx?.in_msg ?? tx?.inMsg ?? null
+
+      if (!tx || (!Array.isArray(outMsgs) && !inMsg)) {
+        const reason = raw ? 'TonAPI returned unexpected transaction shape' : 'TonAPI returned empty response'
+        if (attempt < 5) {
+          console.warn('TonAPI verify retry due to missing transaction data', { attempt, reason, raw })
+          await sleep(3000)
+          continue
+        }
+        console.error('TonAPI verify failed: no transaction data', { attempt, reason, raw })
+        return { ok: false, reason }
+      }
+
+      const paymentOut = Array.isArray(outMsgs)
+        ? outMsgs.find(msg => normalize(msg.destination?.address) === normalize(recipientWallet))
+        : null
+
+      const matchedAddress = normalize(paymentOut?.destination?.address) || normalize(inMsg?.destination?.address)
+      const tonAmount = paymentOut ? paymentOut.value / 1e9 : inMsg?.value / 1e9
+      const amountOk = typeof tonAmount === 'number' && tonAmount >= expectedTon * 0.99
+      const destMatch = Boolean(paymentOut) || matchedAddress === normalize(recipientWallet)
+
+      if (!destMatch) {
+        console.error('TonAPI verify mismatch: wrong destination', {
+          expected: normalize(recipientWallet),
+          actual: matchedAddress,
+          txType: paymentOut ? 'out_msg' : 'in_msg',
+          tx,
+        })
+        return { ok: false, reason: 'Wrong destination' }
+      }
+      if (!amountOk) {
+        console.error('TonAPI verify mismatch: wrong amount', {
+          expectedTon,
+          actualTon: tonAmount,
+          tx,
+        })
+        return { ok: false, reason: `Amount too low: ${tonAmount} < ${expectedTon}` }
+      }
+
+      return { ok: true }
+    } catch (e) {
+      const errorData = e.response?.data || e.message || ''
+      const message = typeof errorData === 'string' ? errorData : JSON.stringify(errorData)
+      const transient = e.response?.status === 404 || /not found|not indexed|no transaction|empty response/i.test(message)
+
+      if (attempt < 5 && transient) {
+        console.warn('TonAPI verify transient error, retrying', { attempt, error: message })
+        await sleep(3000)
+        continue
+      }
+
+      console.error('TonAPI error:', errorData)
+      return { ok: false, reason: errorData?.error || message || 'API error' }
+    }
+  }
+
+  return { ok: false, reason: 'TonAPI verify retry exhausted' }
 }
