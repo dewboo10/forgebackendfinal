@@ -101,7 +101,15 @@ export default async function storeRoutes(app) {
     // Verify TON transaction via TonAPI
     try {
       const verified = await verifyTonTx(boc, item.priceTON, process.env.TON_WALLET)
-      if (!verified.ok) return reply.code(400).send({ error: 'Transaction invalid', detail: verified.reason })
+      if (!verified.ok) {
+        console.error('TON verify rejected transaction', {
+          userId: req.user.id,
+          itemId,
+          priceTON: item.priceTON,
+          reason: verified.reason,
+        })
+        return reply.code(400).send({ error: 'Transaction invalid', detail: verified.reason })
+      }
 
       return await db.tx(async (client) => {
         // Record purchase
@@ -210,14 +218,31 @@ async function verifyTonTx(boc, expectedTon, recipientWallet) {
       ? tx.out_msgs.find(msg => normalize(msg.destination?.address) === normalize(recipientWallet))
       : null
 
-    const destMatch = Boolean(paymentOut) || normalize(tx.in_msg?.destination?.address) === normalize(recipientWallet)
+    const matchedAddress = normalize(paymentOut?.destination?.address) || normalize(tx.in_msg?.destination?.address)
     const tonAmount = paymentOut ? paymentOut.value / 1e9 : tx.in_msg?.value / 1e9
-    const amountOk = tonAmount >= expectedTon * 0.99  // 1% tolerance
-    if (!destMatch) return { ok: false, reason: 'Wrong destination' }
-    if (!amountOk)  return { ok: false, reason: `Amount too low: ${tonAmount} < ${expectedTon}` }
+    const amountOk = typeof tonAmount === 'number' && tonAmount >= expectedTon * 0.99  // 1% tolerance
+    const destMatch = Boolean(paymentOut) || matchedAddress === normalize(recipientWallet)
+
+    if (!destMatch) {
+      console.error('TonAPI verify mismatch: wrong destination', {
+        expected: normalize(recipientWallet),
+        actual: matchedAddress,
+        txType: paymentOut ? 'out_msg' : 'in_msg',
+        tx,
+      })
+      return { ok: false, reason: 'Wrong destination' }
+    }
+    if (!amountOk) {
+      console.error('TonAPI verify mismatch: wrong amount', {
+        expectedTon,
+        actualTon: tonAmount,
+        tx,
+      })
+      return { ok: false, reason: `Amount too low: ${tonAmount} < ${expectedTon}` }
+    }
     return { ok: true }
   } catch (e) {
     console.error('TonAPI error:', e.response?.data || e.message)
-    return { ok: false, reason: 'API error' }
+    return { ok: false, reason: e.response?.data?.error || e.message || 'API error' }
   }
 }
