@@ -1,7 +1,6 @@
 // src/routes/store.js
 import { telegramAuth } from '../middleware/auth.js'
 import { db } from '../db/index.js'
-import { getMiningState } from '../services/mining.js'
 import axios from 'axios'
 import TelegramBot from 'node-telegram-bot-api'
 
@@ -131,45 +130,6 @@ export default async function storeRoutes(app) {
       console.error('TON verify error:', e.message, e.response?.data)
       return reply.code(500).send({ error: 'Verification failed', detail: e.message })
     }
-  })
-
-  // POST /api/store/use-boost — consume a boost charge and activate it
-  app.post('/api/store/use-boost', { preHandler: telegramAuth }, async (req, reply) => {
-    const { boostType } = req.body
-    if (!['boost_surge', 'boost_turbo'].includes(boostType)) {
-      return reply.code(400).send({ error: 'Invalid boost type' })
-    }
-
-    const { rows } = await db.query('SELECT * FROM users WHERE id=$1', [req.user.id])
-    const user = rows[0]
-    const isSurge = boostType === 'boost_surge'
-    const chargesField = isSurge ? 'boost_charges' : 'turbo_charges'
-    const usedField = isSurge ? 'boost_surge_used' : 'boost_turbo_used'
-    const boostTypeValue = isSurge ? '3x_surge' : '5x_turbo'
-    const boostSeconds = isSurge ? 60 : 90
-
-    const charges = Number(user[chargesField] || 0)
-    const usedAt = user[usedField] ? new Date(user[usedField]) : null
-    const cooldownMs = isSurge ? 4 * 3600000 : 6 * 3600000
-    const freeReady = !usedAt || (Date.now() - usedAt.getTime() >= cooldownMs)
-
-    if (charges <= 0 && !freeReady) {
-      return reply.code(400).send({ error: 'No boost charges available' })
-    }
-    if (user.boost_active && user.boost_until && new Date(user.boost_until) > new Date()) {
-      return reply.code(400).send({ error: 'Another boost is already active' })
-    }
-
-    const newState = await db.tx(async (client) => {
-      const remainingCharges = charges > 0 ? charges - 1 : 0
-      await client.query(
-        `UPDATE users SET ${chargesField}=$2, boost_active=$3, boost_until=NOW() + INTERVAL '${boostSeconds} seconds', ${usedField}=NOW() WHERE id=$1`,
-        [req.user.id, remainingCharges, boostTypeValue]
-      )
-      const { rows: updatedRows } = await client.query('SELECT * FROM users WHERE id=$1', [req.user.id])
-      return await getMiningState(updatedRows[0])
-    })
-    return reply.send({ ok: true, state: newState })
   })
 
   // Webhook: Telegram pays us for Stars purchases
