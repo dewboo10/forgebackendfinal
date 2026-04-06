@@ -1,6 +1,6 @@
 // src/jobs/index.js — Background workers (no Redis / BullMQ)
 import { db, getConfig, getTotalUsers, cacheDel } from '../db/index.js'
-import { getHalvingMultiplier, getUserUpgrades, calcPendingEarnings, applyEarnings, payReferralCommission , calcRate } from '../services/mining.js'
+import { getHalvingMultiplier, getUserUpgrades, calcPendingEarnings, applyEarnings, applyEarningsAndRestart, payReferralCommission , calcRate } from '../services/mining.js'
 
 // ─── Automine Worker — runs every 5 min, credits all automine users ───────────
 async function runAutomine() {
@@ -27,7 +27,9 @@ async function runAutomine() {
         const refPct = parseFloat(await getConfig('referral_percent') || '0.1')
 
         await db.tx(async (client) => {
-          await applyEarnings(client, user.id, earnedPerInterval, rate)
+          // FIX FOR BUG #1: Use applyEarningsAndRestart instead of applyEarnings to keep automine alive.
+          // This resets mining_start = NOW() so the 5-min cleanup job doesn't kill the session.
+          await applyEarningsAndRestart(client, user.id, earnedPerInterval, rate)
           if (user.referred_by) {
             await payReferralCommission(client, earnedPerInterval, user.referred_by, refPct)
           }
@@ -108,12 +110,49 @@ async function runHeartbeatCleanup() {
       }
     }
     if (stale.length > 0) console.log(`[cleanup] Stopped ${stale.length} stale sessions`)
+
+    // FIX FOR BUG #2: After stopping stale non-automine sessions, recover any
+    // automine orphans (sessions that died but automine is still active).
+    // This ensures automine never stays dead when the user is not online.
+    await restartAutomineOrphans()
   } catch (e) {
     console.error('[cleanup] Error:', e.message)
   }
 }
 
 // ─── Schedule recurring jobs ───────────────────────────────────────────────────
+// ─── Automine orphan recovery — restart sessions that died while automine active ───
+// FIX FOR BUG #2: When automine session dies (heartbeat stale), we need to detect
+// and restart it if automine is still active. Without this, when the automine job
+// writes earnings, mining_start is NULL so no session exists. User has to open the
+// app to get earnings flowing again. This block restarts all orphaned automine.
+async function restartAutomineOrphans() {
+  try {
+    const { rows: orphans } = await db.query(`
+      SELECT * FROM users
+      WHERE mining_start IS NULL
+        AND is_banned = FALSE
+        AND (automine_lifetime = TRUE OR (automine_until IS NOT NULL AND automine_until > NOW()))
+    `)
+
+    for (const user of orphans) {
+      try {
+        await db.query(
+          'UPDATE users SET mining_start=NOW(), last_heartbeat=NOW() WHERE id=$1',
+          [user.id]
+        )
+        console.log(`[cleanup] Restarted orphaned automine for user ${user.id}`)
+      } catch(e) {
+        console.error(`[cleanup] Failed to restart ${user.id}:`, e.message)
+      }
+    }
+    if (orphans.length > 0) console.log(`[cleanup] Recovered ${orphans.length} orphaned automine sessions`)
+  } catch (e) {
+    console.error('[cleanup] Orphan recovery error:', e.message)
+  }
+}
+
+// ─── Schedule recurring jobs ────────────────────────────────────────────────────
 export async function scheduleJobs() {
   // Run immediately on startup, then on interval
   runAutomine()

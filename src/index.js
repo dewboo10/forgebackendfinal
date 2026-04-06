@@ -73,6 +73,25 @@ const start = async () => {
     await app.listen({ port: parseInt(process.env.PORT || '3001'), host: '0.0.0.0' })
     console.log(`🚀 Forge backend running on port ${process.env.PORT || 3001}`)
     await scheduleJobs()
+
+    // FIX FOR BUG #4: Keep-alive ping for Render free tier
+    // Render puts free apps to sleep after 15 min of inactivity.
+    // Ping ourselves every 14 min to stay awake. Without this, in-flight
+    // heartbeats get killed, making the backend think users disconnected,
+    // which kills their mining sessions. This prevents cold starts.
+    if (process.env.NODE_ENV === 'production') {
+      const keepaliveInterval = setInterval(async () => {
+        try {
+          const hostname = process.env.RENDER_EXTERNAL_HOSTNAME || 'localhost'
+          const url = `https://${hostname}/health`
+          await fetch(url)
+          console.log('[keepalive] pinged')
+        } catch(e) {
+          console.warn('[keepalive] ping failed:', e.message)
+        }
+      }, 14 * 60 * 1000)  // every 14 minutes (Render sleeps after 15)
+      console.log('[keepalive] Renderer keep-alive scheduled')
+    }
   } catch (err) {
     console.error('Startup error:', err)
     process.exit(1)

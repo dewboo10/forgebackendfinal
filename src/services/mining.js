@@ -128,6 +128,41 @@ export async function applyEarnings(client, userId, earnedFrg, rate = 0.1) {
   }
 }
 
+// ─── Apply earnings AND restart mining session (for automine) ────────────────
+// FIX FOR BUG #1: Automine job needs to credit earnings AND reset mining_start
+// to NOW() so the session stays alive. Without this, the session goes stale after
+// 5 min, heartbeat cleanup kills it, and automine is dead until user opens app.
+// This function keeps automine sessions perpetually alive by resetting the timer.
+export async function applyEarningsAndRestart(client, userId, earnedFrg, rate = 0.1) {
+  const earnedInt = Math.floor(earnedFrg * 10000)
+  const { rows } = await client.query(
+    `UPDATE users
+     SET balance        = balance + $2,
+         total_mined    = total_mined + $2,
+         mining_start   = NOW(),
+         last_heartbeat = NOW()
+     WHERE id = $1
+     RETURNING balance, total_mined`,
+    [userId, earnedInt]
+  )
+
+  // Block chance based on seconds mined
+  const secondsMined = earnedFrg > 0 ? earnedFrg / Math.max(rate, 0.1) : 0
+  const blockChance = Math.min(secondsMined / 150, 0.95)
+  const blocksEarned = Math.random() < blockChance ? 1 : 0
+
+  const { rows: blockRows } = await client.query(
+    'UPDATE users SET blocks_found = blocks_found + $2 WHERE id = $1 RETURNING blocks_found',
+    [userId, blocksEarned]
+  )
+
+  return {
+    balance:      rows[0].balance / 10000,
+    total_mined:  rows[0].total_mined / 10000,
+    blocks_found: blockRows[0].blocks_found,
+  }
+}
+
 // ─── Upgrade cost at a given level ────────────────────────────────────────────
 export function upgradeCost(upgrade, currentLevel) {
   return Math.floor(upgrade.baseCost * Math.pow(2.2, currentLevel))
