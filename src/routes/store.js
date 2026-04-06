@@ -78,8 +78,16 @@ export default async function storeRoutes(app) {
   // POST /api/store/verify — verify TON transaction
   app.post('/api/store/verify', { preHandler: telegramAuth }, async (req, reply) => {
     const { boc, itemId } = req.body
+    if (!boc) {
+      console.error('Verify request missing boc:', { userId: req.user.id, itemId })
+      return reply.code(400).send({ error: 'Missing transaction payload' })
+    }
     const item = STORE_ITEMS[itemId]
     if (!item) return reply.code(400).send({ error: 'Invalid item' })
+
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('Verify TON purchase request:', { userId: req.user.id, itemId, priceTON: item.priceTON })
+    }
 
     // Check not already purchased (for non-consumables)
     if (item.type !== 'boost' && item.type !== 'chest') {
