@@ -10,7 +10,7 @@ const bot = new TelegramBot(process.env.BOT_TOKEN)
 const STORE_ITEMS = {
   auto_7d:       { type: 'automine', days: 7,    priceTON: 0.001,  priceStars: 100 },
   auto_30d:      { type: 'automine', days: 30,   priceTON: 0.002,  priceStars: 350 },
-  auto_lifetime: { type: 'automine', days: null,  priceTON: 0.01, priceStars: 1500 },
+  auto_lifetime: { type: 'automine', days: null,  priceTON: 0.1, priceStars: 1500 }, // updated price from 0.01 TON to 0.1 TON
   speed_perm:    { type: 'perm',     days: null,  priceTON: 18, priceStars: 900 },
   chest_s:       { type: 'chest',    frg: 25000,  priceTON: 2,  priceStars: 100 },
   chest_m:       { type: 'chest',    frg: 100000, priceTON: 5,  priceStars: 250 },
