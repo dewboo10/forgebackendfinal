@@ -211,5 +211,8 @@ export async function getMiningState(user) {
       : null,
     boost_charges:  user.boost_charges,
     turbo_charges:  user.turbo_charges,
+
+    surge_used_at:  user.surge_used_at ? new Date(user.surge_used_at).getTime() : null,
+    turbo_used_at:  user.turbo_used_at ? new Date(user.turbo_used_at).getTime() : null,
   }
 }

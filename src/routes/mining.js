@@ -211,4 +211,64 @@ export default async function miningRoutes(app) {
       return reply.send({ ok: true, new_level: currentLevel + 1, balance: newBalance, newBalance })
     })
   })
+
+  // POST /api/mining/boost/activate
+  // Validates cooldown server-side before allowing boost activation.
+  // This prevents bypass via page reload since timestamps live in the DB.
+  app.post('/api/mining/boost/activate', { preHandler: telegramAuth }, async (req, reply) => {
+    const { boostType } = req.body  // 'surge' or 'turbo'
+
+    if (!['surge', 'turbo'].includes(boostType)) {
+      return reply.code(400).send({ error: 'Invalid boost type' })
+    }
+
+    const COOLDOWNS = {
+      surge: 4 * 60 * 60 * 1000,   // 4 hours in ms
+      turbo: 6 * 60 * 60 * 1000,   // 6 hours in ms
+    }
+
+    const col      = boostType === 'surge' ? 'surge_used_at' : 'turbo_used_at'
+    const chargeCol = boostType === 'surge' ? 'boost_charges' : 'turbo_charges'
+    const cooldownMs = COOLDOWNS[boostType]
+
+    return await db.tx(async (client) => {
+      // Lock the row so concurrent requests can't double-spend a charge
+      const { rows } = await client.query(
+        'SELECT * FROM users WHERE id=$1 FOR UPDATE',
+        [req.user.id]
+      )
+      const user = rows[0]
+
+      // Check cooldown
+      const usedAt = user[col]
+      if (usedAt) {
+        const elapsed = Date.now() - new Date(usedAt).getTime()
+        if (elapsed < cooldownMs) {
+          return reply.code(429).send({
+            error:       'Cooldown active',
+            remainingMs: cooldownMs - elapsed,
+            usedAt:      new Date(usedAt).getTime(),
+          })
+        }
+      }
+
+      // Check free charge available
+      const charges = user[chargeCol] || 0
+      if (charges <= 0) {
+        return reply.code(400).send({ error: 'No charges available' })
+      }
+
+      // Deduct charge + stamp timestamp atomically
+      await client.query(
+        `UPDATE users SET ${col}=NOW(), ${chargeCol}=${chargeCol}-1 WHERE id=$1`,
+        [req.user.id]
+      )
+
+      return reply.send({
+        ok:          true,
+        activatedAt: Date.now(),
+        chargesLeft: charges - 1,
+      })
+    })
+  })
 }
