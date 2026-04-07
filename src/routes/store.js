@@ -28,7 +28,7 @@ const STORE_ITEMS = {
   chest_s:       { type: 'chest',    frg: 25000,  priceTON: 2,  priceStars: 100 },
   chest_m:       { type: 'chest',    frg: 100000, priceTON: 5,  priceStars: 250 },
   chest_xl:      { type: 'chest',    frg: 500000, priceTON: 14, priceStars: 700 },
-  boost_surge:   { type: 'boost',    boost: '3x_surge', priceStars: 20 },
+  boost_surge:   { type: 'boost',    boost: '3x_surge', priceStars: 1 },
   boost_turbo:   { type: 'boost',    boost: '5x_turbo', priceStars: 30 },
 }
 
