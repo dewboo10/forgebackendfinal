@@ -384,7 +384,7 @@ export default async function socialRoutes(app) {
 
       const reward = mission.rewards[checkpointIndex]
       const { rows: updated } = await client.query(
-        'UPDATE users SET balance=balance+$2 WHERE id=$1 RETURNING balance',
+        'UPDATE users SET balance=balance+$2, total_mined=total_mined+$2 WHERE id=$1 RETURNING balance',
         [u.id, reward * 10000]
       )
       return reply.send({ ok: true, reward, newBalance: updated[0].balance / 10000 })
