@@ -5,6 +5,19 @@ import axios from 'axios'
 import TelegramBot from 'node-telegram-bot-api'
 
 const bot = new TelegramBot(process.env.BOT_TOKEN)
+const STARS_WEBHOOK_PATH = '/api/store/stars-webhook'
+const TELEGRAM_WEBHOOK_URL = process.env.TELEGRAM_WEBHOOK_URL || process.env.BOT_WEBHOOK_URL
+
+if (TELEGRAM_WEBHOOK_URL) {
+  const webhookUrl = TELEGRAM_WEBHOOK_URL.replace(/\/$/, '') + STARS_WEBHOOK_PATH
+  bot.setWebHook(webhookUrl).then(() => {
+    console.log('Telegram Stars webhook registered at', webhookUrl)
+  }).catch((err) => {
+    console.error('Failed to register Telegram Stars webhook:', err.message || err)
+  })
+} else {
+  console.warn('Telegram Stars webhook not configured. Set TELEGRAM_WEBHOOK_URL or BOT_WEBHOOK_URL to enable Stars payments.')
+}
 
 // Store item definitions — must match frontend
 const STORE_ITEMS = {
