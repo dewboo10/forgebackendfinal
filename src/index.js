@@ -17,6 +17,12 @@ import miningRoutes  from './routes/mining.js'
 import storeRoutes   from './routes/store.js'
 import socialRoutes  from './routes/social.js'
 import adminRoutes   from './routes/admin.js'
+import { db } from './db/index.js'
+
+// ─── ONE-TIME DATA FIXES ──────────────────────────────────────────────────────
+// Fix referral_percent: was '0.1' (meant 10% but code divides by 100 → 0.1%).
+// Correct value is '10' so that 10 / 100 = 0.1 = 10%.
+await db.query(`UPDATE config SET value='10' WHERE key='referral_percent' AND value='0.1'`)
 
 const app = Fastify({
   logger: process.env.NODE_ENV !== 'production',

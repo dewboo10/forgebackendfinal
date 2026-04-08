@@ -168,7 +168,7 @@ INSERT INTO config (key, value) VALUES
   ('halving_epochs',        '[{"users":0,"label":"Genesis","rate":1.0},{"users":1000,"label":"1K","rate":0.5},{"users":10000,"label":"10K","rate":0.25},{"users":100000,"label":"100K","rate":0.125},{"users":1000000,"label":"1M","rate":0.0625},{"users":100000000,"label":"100M","rate":0.03125}]'),
   ('automine_offline_cap',  '28800'),
   ('referral_bonus_frg',    '5000'),
-  ('referral_percent',      '0.1'),
+  ('referral_percent',      '10'),
   ('daily_reward_base',     '1000'),
   ('maintenance_mode',      'false'),
   ('registration_open',     'true'),

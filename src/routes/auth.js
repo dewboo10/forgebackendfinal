@@ -52,69 +52,72 @@ export default async function authRoutes(app) {
 
     const refCode = startParam.startsWith('ref_') ? startParam.slice(4) : null
 
-    return await db.tx(async (client) => {
-   const { rows } = await client.query(
-        `INSERT INTO users (id, username, first_name, last_name, photo_url, language_code)
-         VALUES ($1,$2,$3,$4,$5,$6)
-         ON CONFLICT (id) DO UPDATE SET
-           username=EXCLUDED.username,
-           first_name=EXCLUDED.first_name,
-           last_name=EXCLUDED.last_name,
-           last_seen=NOW()
-         RETURNING *, (xmax = 0) AS is_new_user`,
-        [tgUser.id, tgUser.username, tgUser.first_name, tgUser.last_name, tgUser.photo_url, tgUser.language_code]
-      )
-      let user = rows[0]
+    // Log every login so we can see if start_param is being received
+    console.log(`[login] user=${tgUser.id} start_param="${startParam}" refCode="${refCode}"`)
 
-      if (!user.ref_code) {
-        const code = genRefCode(user.id)
-        await client.query('UPDATE users SET ref_code=$2 WHERE id=$1', [user.id, code])
-        user.ref_code = code
-      }
-
-      if (!user.referred_by && refCode && open !== 'false') {
-        const { rows: refRows } = await client.query(
-          'SELECT id FROM users WHERE ref_code=$1 AND id!=$2',
-          [refCode, user.id]
+    try {
+      return await db.tx(async (client) => {
+        const { rows } = await client.query(
+          `INSERT INTO users (id, username, first_name, last_name, photo_url, language_code)
+           VALUES ($1,$2,$3,$4,$5,$6)
+           ON CONFLICT (id) DO UPDATE SET
+             username=EXCLUDED.username,
+             first_name=EXCLUDED.first_name,
+             last_name=EXCLUDED.last_name,
+             last_seen=NOW()
+           RETURNING *, (xmax = 0) AS is_new_user`,
+          [tgUser.id, tgUser.username, tgUser.first_name, tgUser.last_name, tgUser.photo_url, tgUser.language_code]
         )
-        if (refRows.length > 0) {
-          const referrerId = refRows[0].id
-          await client.query('UPDATE users SET referred_by=$2 WHERE id=$1', [user.id, referrerId])
-          await client.query(
-            `INSERT INTO referrals (referrer_id, referee_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
-            [referrerId, user.id]
-          )
-          const bonusStr = await getConfig('referral_bonus_frg')
-          const bonus = parseInt(bonusStr || '5000')
-          await client.query(
-            'UPDATE users SET balance=balance+$2 WHERE id=$1',
-            [user.id, bonus * 10000]
-          )
-          await client.query(
-            `INSERT INTO notifications (user_id, type, title, body)
-             VALUES ($1,'referral','New recruit joined!',$2)`,
-            [referrerId, `${tgUser.first_name} joined using your link. +10% of all their mining goes to you.`]
-          )
+        let user = rows[0]
+
+        if (!user.ref_code) {
+          const code = genRefCode(user.id)
+          await client.query('UPDATE users SET ref_code=$2 WHERE id=$1', [user.id, code])
+          user.ref_code = code
         }
-      }
 
-      // Invalidate user cache
-      cacheDel(`user:${user.id}`)
+        if (!user.referred_by && refCode && open !== 'false') {
+          const { rows: refRows } = await client.query(
+            'SELECT id FROM users WHERE ref_code=$1 AND id!=$2',
+            [refCode, user.id]
+          )
+          if (refRows.length > 0) {
+            const referrerId = refRows[0].id
+            console.log(`[referral] user=${user.id} referred by ${referrerId} via code "${refCode}"`)
+            await client.query('UPDATE users SET referred_by=$2 WHERE id=$1', [user.id, referrerId])
+            await client.query(
+              `INSERT INTO referrals (referrer_id, referee_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
+              [referrerId, user.id]
+            )
+            const bonusStr = await getConfig('referral_bonus_frg')
+            const bonus = parseInt(bonusStr || '5000')
+            await client.query(
+              'UPDATE users SET balance=balance+$2 WHERE id=$1',
+              [user.id, bonus * 10000]
+            )
+            await client.query(
+              `INSERT INTO notifications (user_id, type, title, body)
+               VALUES ($1,'referral','New recruit joined!',$2)`,
+              [referrerId, `${tgUser.first_name} joined using your link. +10% of all their mining goes to you.`]
+            )
+          } else {
+            console.log(`[referral] code "${refCode}" not found in DB — no referral recorded`)
+          }
+        } else if (refCode && user.referred_by) {
+          console.log(`[referral] user=${user.id} already has a referrer — skipping`)
+        }
 
-   return reply.send({ ok: true, user: sanitizeUser(user), isNewUser: rows[0].is_new_user })
-    })
+        // Invalidate user cache
+        cacheDel(`user:${user.id}`)
+
+        return reply.send({ ok: true, user: sanitizeUser(user), isNewUser: rows[0].is_new_user })
+      })
+    } catch (e) {
+      console.error(`[login] transaction failed for user=${tgUser.id}:`, e.message)
+      return reply.code(500).send({ error: 'Login failed' })
+    }
   })
 }
-
-// function sanitizeUser(u) {
-//   return {
-//     id:         u.id,
-//     username:   u.username,
-//     first_name: u.first_name,
-//     ref_code:   u.ref_code,
-//     is_admin:   u.is_admin,
-//   }
-// }
 
 function sanitizeUser(u) {
   return {
