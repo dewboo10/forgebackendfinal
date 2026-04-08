@@ -7,6 +7,14 @@ import {
   UPGRADES, upgradeCost, payReferralCommission
 } from '../services/mining.js'
 
+// Read active boost multiplier from a user row (1 if none / expired)
+function getBoostMult(user) {
+  if (user.boost_active && user.boost_until && new Date(user.boost_until) > new Date()) {
+    return user.boost_active === '5x_turbo' ? 5 : 3
+  }
+  return 1
+}
+
 export default async function miningRoutes(app) {
 
   // GET /api/mining/state
@@ -46,10 +54,10 @@ export default async function miningRoutes(app) {
       const halvingMult = await getHalvingMultiplier()
       const upgrades = await getUserUpgrades(user.id)
       const rate = await calcRate(user, upgrades, halvingMult)
-      const earned = await calcPendingEarnings(user, upgrades, halvingMult)
+      const boostMult = getBoostMult(user)
+      const earned = await calcPendingEarnings(user, upgrades, halvingMult, boostMult)
 
       return await db.tx(async (client) => {
-        // applyEarnings now returns total blocks_found (not just the increment)
         const result = await applyEarnings(client, user.id, earned, rate)
         if (user.referred_by) {
           const refPct = parseFloat(await getConfig('referral_percent') || '0.1')
@@ -81,7 +89,8 @@ export default async function miningRoutes(app) {
       const halvingMult = await getHalvingMultiplier()
       const upgrades = await getUserUpgrades(user.id)
       const rate = await calcRate(user, upgrades, halvingMult)
-      const earned = await calcPendingEarnings(user, upgrades, halvingMult)
+      const boostMult = getBoostMult(user)
+      const earned = await calcPendingEarnings(user, upgrades, halvingMult, boostMult)
 
       if (earned > 0) {
         const refPct = parseFloat(await getConfig('referral_percent') || '0.1')
@@ -132,7 +141,8 @@ export default async function miningRoutes(app) {
     const halvingMult = await getHalvingMultiplier()
     const upgrades = await getUserUpgrades(user.id)
     const rate = await calcRate(user, upgrades, halvingMult)
-    const earned = await calcPendingEarnings(user, upgrades, halvingMult)
+    const boostMult = getBoostMult(user)
+    const earned = await calcPendingEarnings(user, upgrades, halvingMult, boostMult)
 
     return await db.tx(async (client) => {
       const result = await applyEarnings(client, user.id, earned, rate)
@@ -258,10 +268,15 @@ export default async function miningRoutes(app) {
         return reply.code(400).send({ error: 'No charges available' })
       }
 
-      // Deduct charge + stamp timestamp atomically
+      // Deduct charge + stamp timestamp + store active boost so heartbeat can apply it
+      const boostLabel    = boostType === 'surge' ? '3x_surge' : '5x_turbo'
+      const boostDuration = boostType === 'surge' ? 60 : 90   // seconds
       await client.query(
-        `UPDATE users SET ${col}=NOW(), ${chargeCol}=${chargeCol}-1 WHERE id=$1`,
-        [req.user.id]
+        `UPDATE users
+         SET ${col}=NOW(), ${chargeCol}=${chargeCol}-1,
+             boost_active=$2, boost_until=NOW() + ($3 || ' seconds')::interval
+         WHERE id=$1`,
+        [req.user.id, boostLabel, boostDuration]
       )
 
       return reply.send({
