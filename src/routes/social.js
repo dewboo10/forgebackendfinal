@@ -139,6 +139,8 @@ export default async function socialRoutes(app) {
 
   app.post('/api/circle/invite', { preHandler: telegramAuth }, async (req, reply) => {
     const { telegramId } = req.body
+    if (!telegramId) return reply.code(400).send({ error: 'telegramId required' })
+
     const maxSize = parseInt(await getConfig('max_circle_size') || '5')
     const { rows: countRows } = await db.query(
       'SELECT COUNT(*) FROM circle_members WHERE owner_id=$1', [req.user.id]
@@ -146,18 +148,32 @@ export default async function socialRoutes(app) {
     if (parseInt(countRows[0].count) >= maxSize)
       return reply.code(400).send({ error: 'Circle full' })
 
-    const { rows: targetRows } = await db.query('SELECT id FROM users WHERE id=$1', [telegramId])
+    // Accept either a numeric Telegram ID or a @username / plain username
+    const input = String(telegramId).replace(/^@/, '').trim()
+    const isNumeric = /^\d+$/.test(input)
+    const { rows: targetRows } = await db.query(
+      isNumeric
+        ? 'SELECT id, first_name, username FROM users WHERE id=$1'
+        : 'SELECT id, first_name, username FROM users WHERE LOWER(username)=LOWER($1)',
+      [isNumeric ? parseInt(input) : input]
+    )
     if (!targetRows.length) return reply.code(404).send({ error: 'User not found' })
+    const target = targetRows[0]
+
+    if (target.id === req.user.id)
+      return reply.code(400).send({ error: 'Cannot invite yourself' })
+
+    const { rowCount } = await db.query(
+      `INSERT INTO circle_invites (from_id, to_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
+      [req.user.id, target.id]
+    )
+    if (rowCount === 0) return reply.code(400).send({ error: 'Invite already sent' })
 
     await db.query(
-      `INSERT INTO circle_invites (from_id, to_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
-      [req.user.id, telegramId]
-    )
-    await db.query(
       `INSERT INTO notifications (user_id, type, title, body) VALUES ($1,'system','Circle Invite',$2)`,
-      [telegramId, `${req.user.first_name || 'Someone'} invited you to their Security Circle.`]
+      [target.id, `${req.user.first_name || 'Someone'} invited you to their Security Circle.`]
     )
-    return reply.send({ ok: true })
+    return reply.send({ ok: true, invitedName: target.first_name || target.username })
   })
 
   app.post('/api/circle/accept', { preHandler: telegramAuth }, async (req, reply) => {
@@ -168,9 +184,16 @@ export default async function socialRoutes(app) {
     )
     if (!rows.length) return reply.code(404).send({ error: 'Request not found' })
     const invite = rows[0]
+    // trusted=TRUE: the person accepted, meaning they verified the relationship
     await db.query(
-      `INSERT INTO circle_members (owner_id, member_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
+      `INSERT INTO circle_members (owner_id, member_id, trusted) VALUES ($1,$2,TRUE)
+       ON CONFLICT (owner_id, member_id) DO UPDATE SET trusted=TRUE`,
       [invite.from_id, invite.to_id]
+    )
+    // Notify the inviter that their request was accepted
+    await db.query(
+      `INSERT INTO notifications (user_id, type, title, body) VALUES ($1,'system','Circle Request Accepted',$2)`,
+      [invite.from_id, `${req.user.first_name || 'Someone'} accepted your Security Circle invite.`]
     )
     return reply.send({ ok: true })
   })
