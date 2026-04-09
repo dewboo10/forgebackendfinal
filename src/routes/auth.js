@@ -50,10 +50,17 @@ export default async function authRoutes(app) {
     const maintenance = await getConfig('maintenance_mode')
     if (maintenance === 'true') return reply.code(503).send({ error: 'Maintenance mode' })
 
-    const refCode = startParam.startsWith('ref_') ? startParam.slice(4) : null
+    // Also accept startParam from the request body — the frontend reads it from
+    // initDataUnsafe.start_param which is more reliable than parsing the raw initData string
+    if (!startParam && req.body?.startParam) {
+      startParam = req.body.startParam
+    }
+
+    const refCode = startParam && startParam.startsWith('ref_') ? startParam.slice(4) : null
 
     // Log every login so we can see if start_param is being received
-    console.log(`[login] user=${tgUser.id} start_param="${startParam}" refCode="${refCode}"`)
+    console.log(`[login] user=${tgUser.id} start_param="${startParam}" refCode="${refCode || 'none'}"`)
+
 
     try {
       return await db.tx(async (client) => {
