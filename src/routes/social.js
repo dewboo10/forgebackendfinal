@@ -46,7 +46,8 @@ export default async function socialRoutes(app) {
       [req.user.id]
     )
     const refPct = await getConfig('referral_percent')
-    const pct = parseFloat(refPct) / 100
+    // Config stores the rate as a decimal fraction (0.1 = 10%) — do NOT divide by 100 again
+    const pct = parseFloat(refPct)
     const referralEarnings = rows.reduce((sum, r) => sum + (r.total_mined / 10000) * pct, 0)
     return reply.send({
       ref_code:          req.user.ref_code,
