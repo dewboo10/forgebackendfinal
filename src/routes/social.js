@@ -266,7 +266,7 @@ export default async function socialRoutes(app) {
     const result = { leaderboard: rows.map((u, i) => ({
       rank: i + 1, id: u.id,
       name: u.first_name || u.username || 'Miner',
-      total_mined: u.total_mined / 10000,
+      totalMined: u.total_mined / 10000,
       blocks_found: u.blocks_found,
       isYou: u.id === req.user.id,
     }))}
