@@ -72,6 +72,13 @@ CREATE TABLE IF NOT EXISTS purchases (
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- ─── PENDING REFERRALS (from /start command before mini app opens) ────────────
+CREATE TABLE IF NOT EXISTS pending_referrals (
+  telegram_id BIGINT PRIMARY KEY,
+  ref_code    TEXT NOT NULL,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- ─── REFERRALS ────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS referrals (
   id          SERIAL PRIMARY KEY,

@@ -56,7 +56,7 @@ export default async function authRoutes(app) {
       startParam = req.body.startParam
     }
 
-    const refCode = startParam && startParam.startsWith('ref_') ? startParam.slice(4) : null
+    let refCode = startParam && startParam.startsWith('ref_') ? startParam.slice(4) : null
 
     // Log every login so we can see if start_param is being received
     console.log(`[login] user=${tgUser.id} start_param="${startParam}" refCode="${refCode || 'none'}"`)
@@ -81,6 +81,20 @@ export default async function authRoutes(app) {
           const code = genRefCode(user.id)
           await client.query('UPDATE users SET ref_code=$2 WHERE id=$1', [user.id, code])
           user.ref_code = code
+        }
+
+        // Fallback: if no refCode came from the mini app's initData, check the
+        // pending_referrals table — populated by the bot's /start webhook when the
+        // user clicked a referral link before the mini app auto-opened.
+        if (!refCode && !user.referred_by) {
+          const { rows: pendingRows } = await client.query(
+            'DELETE FROM pending_referrals WHERE telegram_id=$1 RETURNING ref_code',
+            [tgUser.id]
+          )
+          if (pendingRows.length > 0) {
+            refCode = pendingRows[0].ref_code
+            console.log(`[login] using pending referral for user=${tgUser.id} code="${refCode}"`)
+          }
         }
 
         if (!user.referred_by && refCode && open !== 'false') {

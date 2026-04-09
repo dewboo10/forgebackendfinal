@@ -145,10 +145,34 @@ export default async function storeRoutes(app) {
     }
   })
 
-  // Webhook: Telegram pays us for Stars purchases
+  // Webhook: Telegram sends ALL bot updates here (Stars payments + /start command)
   app.post('/api/store/stars-webhook', async (req, reply) => {
-    // Telegram sends pre_checkout_query and successful_payment updates here
     const update = req.body
+
+    // ── Handle /start ref_XXX command ────────────────────────────────────────
+    // When a user clicks a referral link like t.me/forgeminerbot?startapp=ref_XXX,
+    // Telegram sends a /start ref_XXX message to this webhook even before the mini
+    // app opens. We save it here so the login endpoint can pick it up as a fallback.
+    if (update.message?.text?.startsWith('/start ')) {
+      const param = update.message.text.slice(7).trim()
+      if (param.startsWith('ref_')) {
+        const refCode = param.slice(4)
+        const userId = update.message.from.id
+        try {
+          await db.query(
+            `INSERT INTO pending_referrals (telegram_id, ref_code)
+             VALUES ($1, $2)
+             ON CONFLICT (telegram_id) DO UPDATE SET ref_code=$2, created_at=NOW()`,
+            [userId, refCode]
+          )
+          console.log(`[bot] /start referral saved: user=${userId} code="${refCode}"`)
+        } catch (e) {
+          console.error('[bot] failed to save pending referral:', e.message)
+        }
+      }
+    }
+
+    // ── Handle Stars payments ────────────────────────────────────────────────
     if (update.pre_checkout_query) {
       await bot.answerPreCheckoutQuery(update.pre_checkout_query.id, true)
     }
