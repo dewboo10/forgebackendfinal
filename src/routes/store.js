@@ -149,15 +149,17 @@ export default async function storeRoutes(app) {
   app.post('/api/store/stars-webhook', async (req, reply) => {
     const update = req.body
 
-    // ── Handle /start ref_XXX command ────────────────────────────────────────
-    // When a user clicks a referral link like t.me/forgeminerbot?startapp=ref_XXX,
-    // Telegram sends a /start ref_XXX message to this webhook even before the mini
-    // app opens. We save it here so the login endpoint can pick it up as a fallback.
-    if (update.message?.text?.startsWith('/start ')) {
-      const param = update.message.text.slice(7).trim()
+    // ── Handle /start command (with or without referral code) ────────────────
+    // When a user clicks t.me/forgeminerbot?start=ref_XXX, Telegram sends
+    // /start ref_XXX to this webhook. We save the ref code and send them
+    // a button to open the mini app directly.
+    if (update.message?.text?.startsWith('/start')) {
+      const userId = update.message.from.id
+      const firstName = update.message.from.first_name || 'Miner'
+      const param = update.message.text.slice(6).trim() // everything after "/start"
+
       if (param.startsWith('ref_')) {
         const refCode = param.slice(4)
-        const userId = update.message.from.id
         try {
           await db.query(
             `INSERT INTO pending_referrals (telegram_id, ref_code)
@@ -169,6 +171,25 @@ export default async function storeRoutes(app) {
         } catch (e) {
           console.error('[bot] failed to save pending referral:', e.message)
         }
+      }
+
+      // Send welcome message with a button that opens the mini app directly.
+      // This is shown to ALL users who click /start (with or without referral),
+      // so they don't need to manually find the "StartForge" menu button.
+      try {
+        const appUrl = process.env.FRONTEND_URL
+        await bot.sendMessage(userId,
+          `⛏ Welcome to Forge, ${firstName}!\n\nMine FRG before the next halving cuts rewards. Tap below to open the app:`,
+          {
+            reply_markup: {
+              inline_keyboard: [[
+                { text: '🚀 Open Forge', web_app: { url: appUrl } }
+              ]]
+            }
+          }
+        )
+      } catch (e) {
+        console.error('[bot] failed to send welcome message:', e.message)
       }
     }
 
