@@ -112,6 +112,13 @@ export default async function socialRoutes(app) {
              GREATEST(COALESCE(automine_until,NOW()),NOW()) + INTERVAL '${tier.days} days'
            WHERE id=$1`, [req.user.id]
         )
+      } else if (tier.rewardType === 'speed' && tier.days) {
+        // Speed boost: activate a temporary multiplier using the boost system
+        await client.query(
+          `UPDATE users SET boost_active='3x_surge',
+             boost_until=NOW() + INTERVAL '${tier.days} days'
+           WHERE id=$1`, [req.user.id]
+        )
       } else if (tier.rewardType === 'lifetime') {
         await client.query('UPDATE users SET automine_lifetime=TRUE WHERE id=$1', [req.user.id])
       } else if (tier.rewardType === 'permanent') {
