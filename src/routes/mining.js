@@ -262,27 +262,29 @@ export default async function miningRoutes(app) {
         }
       }
 
-      // Check free charge available
+      // If cooldown has passed, the free charge is restored — no stored charge needed
+      const cooldownPassed = !usedAt || (Date.now() - new Date(usedAt).getTime() >= cooldownMs)
       const charges = user[chargeCol] || 0
-      if (charges <= 0) {
+      if (!cooldownPassed && charges <= 0) {
         return reply.code(400).send({ error: 'No charges available' })
       }
 
-      // Deduct charge + stamp timestamp + store active boost so heartbeat can apply it
+      // Activate boost — if using the free cooldown charge don't decrement the column
       const boostLabel    = boostType === 'surge' ? '3x_surge' : '5x_turbo'
       const boostDuration = boostType === 'surge' ? 60 : 90   // seconds
+      const newCharges    = cooldownPassed ? charges : charges - 1
       await client.query(
         `UPDATE users
-         SET ${col}=NOW(), ${chargeCol}=${chargeCol}-1,
-             boost_active=$2, boost_until=NOW() + ($3 || ' seconds')::interval
+         SET ${col}=NOW(), ${chargeCol}=$2,
+             boost_active=$3, boost_until=NOW() + ($4 || ' seconds')::interval
          WHERE id=$1`,
-        [req.user.id, boostLabel, boostDuration]
+        [req.user.id, newCharges, boostLabel, boostDuration]
       )
 
       return reply.send({
         ok:          true,
         activatedAt: Date.now(),
-        chargesLeft: charges - 1,
+        chargesLeft: newCharges,
       })
     })
   })
