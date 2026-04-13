@@ -1,6 +1,34 @@
 // src/jobs/index.js — Background workers (no Redis / BullMQ)
 import { db, getConfig, getTotalUsers, cacheDel } from '../db/index.js'
-import { getHalvingMultiplier, getUserUpgrades, calcPendingEarnings, applyEarnings, applyEarningsAndRestart, payReferralCommission , calcRate } from '../services/mining.js'
+import { getHalvingMultiplier, calcPendingEarnings, applyEarnings, applyEarningsAndRestart, payReferralCommission, calcRate } from '../services/mining.js'
+
+// ─── Bulk-fetch upgrades for many users in ONE query ─────────────────────────
+// Instead of calling getUserUpgrades(userId) N times (N separate DB round-trips),
+// we fetch all rows for all user IDs at once and build a lookup map.
+async function getBulkUpgrades(userIds) {
+  if (userIds.length === 0) return {}
+  const { rows } = await db.query(
+    'SELECT user_id, upgrade_id, level FROM user_upgrades WHERE user_id = ANY($1)',
+    [userIds]
+  )
+  const map = {}
+  for (const r of rows) {
+    if (!map[r.user_id]) map[r.user_id] = {}
+    map[r.user_id][r.upgrade_id] = r.level
+  }
+  return map
+}
+
+// ─── Process an array of items in parallel batches ───────────────────────────
+// Runs `batchSize` items concurrently, waits for each batch to finish before
+// starting the next. Prevents opening thousands of DB connections at once
+// while still being far faster than sequential await-in-a-loop.
+async function runInParallel(items, fn, batchSize = 20) {
+  for (let i = 0; i < items.length; i += batchSize) {
+    const batch = items.slice(i, i + batchSize)
+    await Promise.all(batch.map(fn))
+  }
+}
 
 // ─── Automine Worker — runs every 5 min, credits all automine users ───────────
 async function runAutomine() {
@@ -16,15 +44,24 @@ async function runAutomine() {
     `)
 
     console.log(`[automine] Processing ${users.length} automine users`)
+    if (users.length === 0) return
 
-    for (const user of users) {
+    // ── Fetch shared values ONCE, not once per user ────────────────────────
+    // halvingMult and refPct are the same for every user in this run.
+    // Previously these were inside the loop, causing N redundant calls.
+    const halvingMult = await getHalvingMultiplier()
+    const refPct = parseFloat(await getConfig('referral_percent') || '0.1')
+
+    // ── Fetch ALL upgrades in ONE query instead of N queries ───────────────
+    const allUpgrades = await getBulkUpgrades(users.map(u => u.id))
+
+    // ── Process 20 users at a time in parallel instead of one at a time ───
+    await runInParallel(users, async (user) => {
       try {
-        const halvingMult = await getHalvingMultiplier()
-        const upgrades = await getUserUpgrades(user.id)
+        const upgrades = allUpgrades[user.id] || {}
         const rate = await calcRate(user, upgrades, halvingMult)
         const earnedPerInterval = await calcIntervalEarnings(user, upgrades, halvingMult, interval)
-        if (earnedPerInterval <= 0) continue
-        const refPct = parseFloat(await getConfig('referral_percent') || '0.1')
+        if (earnedPerInterval <= 0) return
 
         await db.tx(async (client) => {
           // FIX FOR BUG #1: Use applyEarningsAndRestart instead of applyEarnings to keep automine alive.
@@ -37,7 +74,8 @@ async function runAutomine() {
       } catch (e) {
         console.error(`[automine] Error for user ${user.id}:`, e.message)
       }
-    }
+    }, 20)
+
     console.log('[automine] Done')
   } catch (e) {
     console.error('[automine] Error:', e.message)
@@ -94,22 +132,31 @@ async function runHeartbeatCleanup() {
         AND (automine_until IS NULL OR automine_until < NOW())
     `, [cutoff])
 
-    for (const user of stale) {
-      try {
-        const halvingMult = await getHalvingMultiplier()
-        const upgrades = await getUserUpgrades(user.id)
-        const rate = await calcRate(user, upgrades, halvingMult)
-        const earned = await calcPendingEarnings(user, upgrades, halvingMult)
-        const refPct = parseFloat(await getConfig('referral_percent') || '0.1')
-        await db.tx(async (client) => {
-          await applyEarnings(client, user.id, earned, rate)
-          if (user.referred_by) await payReferralCommission(client, earned, user.referred_by, refPct)
-        })
-      } catch (e) {
-        console.error(`[cleanup] Error for user ${user.id}:`, e.message)
-      }
+    if (stale.length > 0) {
+      // ── Fetch shared values ONCE for the whole batch ───────────────────
+      const halvingMult = await getHalvingMultiplier()
+      const refPct = parseFloat(await getConfig('referral_percent') || '0.1')
+
+      // ── Fetch all stale-user upgrades in ONE query ─────────────────────
+      const allUpgrades = await getBulkUpgrades(stale.map(u => u.id))
+
+      // ── Process 20 stale users in parallel instead of one at a time ───
+      await runInParallel(stale, async (user) => {
+        try {
+          const upgrades = allUpgrades[user.id] || {}
+          const rate = await calcRate(user, upgrades, halvingMult)
+          const earned = await calcPendingEarnings(user, upgrades, halvingMult)
+          await db.tx(async (client) => {
+            await applyEarnings(client, user.id, earned, rate)
+            if (user.referred_by) await payReferralCommission(client, earned, user.referred_by, refPct)
+          })
+        } catch (e) {
+          console.error(`[cleanup] Error for user ${user.id}:`, e.message)
+        }
+      }, 20)
+
+      console.log(`[cleanup] Stopped ${stale.length} stale sessions`)
     }
-    if (stale.length > 0) console.log(`[cleanup] Stopped ${stale.length} stale sessions`)
 
     // FIX FOR BUG #2: After stopping stale non-automine sessions, recover any
     // automine orphans (sessions that died but automine is still active).
