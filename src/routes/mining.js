@@ -249,24 +249,20 @@ export default async function miningRoutes(app) {
       )
       const user = rows[0]
 
-      // Check cooldown
       const usedAt = user[col]
-      if (usedAt) {
-        const elapsed = Date.now() - new Date(usedAt).getTime()
-        if (elapsed < cooldownMs) {
-          return reply.code(429).send({
-            error:       'Cooldown active',
-            remainingMs: cooldownMs - elapsed,
-            usedAt:      new Date(usedAt).getTime(),
-          })
-        }
-      }
-
-      // If cooldown has passed, the free charge is restored — no stored charge needed
-      const cooldownPassed = !usedAt || (Date.now() - new Date(usedAt).getTime() >= cooldownMs)
       const charges = user[chargeCol] || 0
+      const cooldownPassed = !usedAt || (Date.now() - new Date(usedAt).getTime() >= cooldownMs)
+
+      // Block only if BOTH: cooldown hasn't passed AND no paid charges.
+      // Paid charges (bought with Stars) always bypass the cooldown — the cooldown
+      // only governs the free charge that replenishes automatically every 4/6h.
       if (!cooldownPassed && charges <= 0) {
-        return reply.code(400).send({ error: 'No charges available' })
+        const elapsed = Date.now() - new Date(usedAt).getTime()
+        return reply.code(429).send({
+          error:       'Cooldown active',
+          remainingMs: cooldownMs - elapsed,
+          usedAt:      new Date(usedAt).getTime(),
+        })
       }
 
       // Activate boost — if using the free cooldown charge don't decrement the column
