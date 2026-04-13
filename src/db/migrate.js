@@ -48,7 +48,14 @@ CREATE TABLE IF NOT EXISTS users (
   is_banned         BOOLEAN DEFAULT FALSE,
   is_admin          BOOLEAN DEFAULT FALSE,
   created_at        TIMESTAMPTZ DEFAULT NOW(),
-  last_seen         TIMESTAMPTZ DEFAULT NOW()
+  last_seen         TIMESTAMPTZ DEFAULT NOW(),
+
+  -- temporary speed boost (speed_3x / speed_5x purchases)
+  speed_boost_until TIMESTAMPTZ,
+  speed_boost_mult  INT DEFAULT 1,
+
+  -- permanent referral earnings multiplier (ref_2x / ref_5x purchases)
+  ref_amp_mult      NUMERIC(4,1) DEFAULT 1.0
 );
 
 -- ─── UPGRADES ─────────────────────────────────────────────────────────────────
@@ -184,11 +191,20 @@ INSERT INTO config (key, value) VALUES
 ON CONFLICT (key) DO NOTHING;
 `
 
+// ─── Incremental migrations for existing databases ───────────────────────────
+// Safe to run multiple times — uses IF NOT EXISTS / DO NOTHING patterns
+const MIGRATIONS = `
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS speed_boost_until TIMESTAMPTZ;
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS speed_boost_mult  INT DEFAULT 1;
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS ref_amp_mult      NUMERIC(4,1) DEFAULT 1.0;
+`
+
 async function migrate() {
   const client = await pool.connect()
   try {
     console.log('🔧 Running migrations...')
     await client.query(SCHEMA)
+    await client.query(MIGRATIONS)
     console.log('✅ Migration complete')
   } finally {
     client.release()

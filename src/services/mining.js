@@ -51,8 +51,12 @@ export async function calcRate(user, upgradeLevels, halvingMult) {
   // Permanent 2× multiplier
   const permMult = user.speed_perm ? 2 : 1
 
+  // Temporary speed boost (3× or 5× for 7 days from speed_3x/speed_5x purchase)
+  const speedBoostMult = user.speed_boost_until && new Date(user.speed_boost_until) > new Date()
+    ? (user.speed_boost_mult || 1) : 1
+
   // Apply halving to base + upgrades together
-  const rate = (baseRate + upgradeBonus) * permMult * halvingMult
+  const rate = (baseRate + upgradeBonus) * permMult * speedBoostMult * halvingMult
 
   return parseFloat(rate.toFixed(6))
 }
@@ -171,7 +175,10 @@ export function upgradeCost(upgrade, currentLevel) {
 // ─── Pay referral commission ──────────────────────────────────────────────────
 export async function payReferralCommission(client, earnedFrg, referrerId, pct) {
   if (!referrerId || earnedFrg <= 0) return
-  const commission = Math.floor(earnedFrg * pct * 10000)
+  // Apply referrer's amp multiplier (from ref_2x / ref_5x purchase) — default 1.0
+  const { rows } = await client.query('SELECT ref_amp_mult FROM users WHERE id=$1', [referrerId])
+  const ampMult = parseFloat(rows[0]?.ref_amp_mult || 1)
+  const commission = Math.floor(earnedFrg * pct * ampMult * 10000)
   if (commission <= 0) return
   await client.query(
     'UPDATE users SET balance=balance+$2 WHERE id=$1',
@@ -214,5 +221,13 @@ export async function getMiningState(user) {
 
     surge_used_at:  user.surge_used_at ? new Date(user.surge_used_at).getTime() : null,
     turbo_used_at:  user.turbo_used_at ? new Date(user.turbo_used_at).getTime() : null,
+
+    // Temporary speed boost from speed_3x / speed_5x purchase
+    speed_boost_until: user.speed_boost_until || null,
+    speed_boost_mult:  user.speed_boost_until && new Date(user.speed_boost_until) > new Date()
+      ? (user.speed_boost_mult || 1) : 1,
+
+    // Referral amp multiplier (2.0 or 5.0 if purchased, else 1.0)
+    ref_amp_mult: parseFloat(user.ref_amp_mult || 1),
   }
 }

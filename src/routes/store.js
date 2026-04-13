@@ -21,13 +21,22 @@ if (TELEGRAM_WEBHOOK_URL) {
 
 // Store item definitions — must match frontend
 const STORE_ITEMS = {
-  auto_7d:       { type: 'automine', days: 7,    priceTON: 0.001,  priceStars: 100 },
-  auto_30d:      { type: 'automine', days: 30,   priceTON: 0.002,  priceStars: 350 },
-  auto_lifetime: { type: 'automine', days: null,  priceTON: 0.1, priceStars: 1500 }, // updated price from 0.01 TON to 0.1 TON
-  speed_perm:    { type: 'perm',     days: null,  priceTON: 18, priceStars: 900 },
-  chest_s:       { type: 'chest',    frg: 25000,  priceTON: 2,  priceStars: 100 },
-  chest_m:       { type: 'chest',    frg: 100000, priceTON: 5,  priceStars: 250 },
-  chest_xl:      { type: 'chest',    frg: 500000, priceTON: 14, priceStars: 700 },
+  // ── Auto-Mine ────────────────────────────────────────────────────────────────
+  auto_7d:       { type: 'automine', days: 7,    priceTON: 3,   priceStars: 1200 },
+  auto_30d:      { type: 'automine', days: 30,   priceTON: 10,  priceStars: 4000 },
+  auto_lifetime: { type: 'automine', days: null,  priceTON: 30,  priceStars: 12000 },
+  // ── Speed Multipliers ────────────────────────────────────────────────────────
+  speed_3x:      { type: 'speed',    days: 7,    mult: 3, priceTON: 4,   priceStars: 1600 },
+  speed_5x:      { type: 'speed',    days: 7,    mult: 5, priceTON: 8,   priceStars: 3200 },
+  speed_perm:    { type: 'perm',     days: null,  priceTON: 18,  priceStars: 7000 },
+  // ── Head Start Chests ────────────────────────────────────────────────────────
+  chest_s:       { type: 'chest',    frg: 25000,  priceTON: 2,   priceStars: 800 },
+  chest_m:       { type: 'chest',    frg: 100000, priceTON: 5,   priceStars: 2000 },
+  chest_xl:      { type: 'chest',    frg: 500000, priceTON: 14,  priceStars: 5500 },
+  // ── Referral Amplifiers ───────────────────────────────────────────────────────
+  ref_2x:        { type: 'ref_amp',  mult: 2,    priceTON: 5,   priceStars: 2000 },
+  ref_5x:        { type: 'ref_amp',  mult: 5,    priceTON: 15,  priceStars: 6000 },
+  // ── Boost Charges ────────────────────────────────────────────────────────────
   boost_surge:   { type: 'boost',    boost: '3x_surge', priceStars: 1 },
   boost_turbo:   { type: 'boost',    boost: '5x_turbo', priceStars: 30 },
 }
@@ -125,19 +134,17 @@ export default async function storeRoutes(app) {
       }
 
       return await db.tx(async (client) => {
-        // Record purchase
         await client.query(
           `INSERT INTO purchases (user_id, item_id, price_ton, boc, verified_at)
            VALUES ($1,$2,$3,$4,NOW())`,
           [req.user.id, itemId, item.priceTON, boc]
         )
-        // Apply item effects
-        await activateItem(client, req.user.id, itemId, item)
+        const result = await activateItem(client, req.user.id, itemId, item)
         await client.query(
           `INSERT INTO notifications (user_id, type, title, body) VALUES ($1,'reward','Purchase Activated!','${itemId} is now active on your account.')`,
           [req.user.id]
         )
-        return reply.send({ ok: true })
+        return reply.send({ ok: true, ...(result || {}) })
       })
  } catch (e) {
       console.error('TON verify error:', e.message, e.response?.data)
@@ -216,17 +223,13 @@ export default async function storeRoutes(app) {
   })
 }
 
-// ─── Activate item effects in DB ──────────────────────────────────────────────
+// ─── Activate item effects in DB ─────────────────────────────────────────────
+// Returns { expiresAt } for time-limited items, null for permanent/instant ones.
 async function activateItem(client, userId, itemId, item) {
   if (item.type === 'automine') {
     if (item.days === null) {
-      // Lifetime
-      await client.query(
-        'UPDATE users SET automine_lifetime=TRUE WHERE id=$1',
-        [userId]
-      )
+      await client.query('UPDATE users SET automine_lifetime=TRUE WHERE id=$1', [userId])
     } else {
-      // Fixed duration — extend if existing
       await client.query(
         `UPDATE users SET automine_until=
            GREATEST(COALESCE(automine_until, NOW()), NOW()) + INTERVAL '${item.days} days'
@@ -234,25 +237,58 @@ async function activateItem(client, userId, itemId, item) {
         [userId]
       )
     }
-    // Start mining if not already
+    // Start mining session if not already running
     await client.query(
       'UPDATE users SET mining_start=COALESCE(mining_start,NOW()), last_heartbeat=NOW() WHERE id=$1',
       [userId]
     )
+    if (item.days) {
+      const { rows } = await client.query('SELECT automine_until FROM users WHERE id=$1', [userId])
+      return { expiresAt: rows[0].automine_until }
+    }
+    return null
+
+  } else if (item.type === 'speed') {
+    // Temporary speed multiplier — extend if user already has one active
+    // Take the higher multiplier when stacking (e.g. buying 5× while 3× active)
+    const { rows } = await client.query(
+      `UPDATE users
+         SET speed_boost_until = GREATEST(COALESCE(speed_boost_until, NOW()), NOW()) + INTERVAL '${item.days} days',
+             speed_boost_mult  = GREATEST(COALESCE(speed_boost_mult, 1), $2)
+       WHERE id=$1
+       RETURNING speed_boost_until`,
+      [userId, item.mult]
+    )
+    return { expiresAt: rows[0].speed_boost_until }
+
   } else if (item.type === 'perm' && itemId === 'speed_perm') {
     await client.query('UPDATE users SET speed_perm=TRUE WHERE id=$1', [userId])
+    return null
+
   } else if (item.type === 'chest') {
     await client.query(
       'UPDATE users SET balance=balance+$2, total_mined=total_mined+$2 WHERE id=$1',
       [userId, item.frg * 10000]
     )
+    return null
+
+  } else if (item.type === 'ref_amp') {
+    // Permanent referral multiplier — take the highest one purchased, never downgrade
+    await client.query(
+      'UPDATE users SET ref_amp_mult=GREATEST(COALESCE(ref_amp_mult,1), $2) WHERE id=$1',
+      [userId, item.mult]
+    )
+    return null
+
   } else if (item.type === 'boost') {
     if (itemId === 'boost_surge') {
       await client.query('UPDATE users SET boost_charges=boost_charges+1 WHERE id=$1', [userId])
     } else if (itemId === 'boost_turbo') {
       await client.query('UPDATE users SET turbo_charges=turbo_charges+1 WHERE id=$1', [userId])
     }
+    return null
   }
+  return null
 }
 
 // ─── Verify TON transaction via TonAPI ────────────────────────────────────────
