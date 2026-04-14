@@ -83,6 +83,14 @@ export default async function authRoutes(app) {
           user.ref_code = code
         }
 
+        // Give new users 1 free surge charge + 1 free turbo charge (one-time welcome gift)
+        if (rows[0].is_new_user) {
+          await client.query(
+            'UPDATE users SET boost_charges=1, turbo_charges=1 WHERE id=$1',
+            [user.id]
+          )
+        }
+
         // Fallback: if no refCode came from the mini app's initData, check the
         // pending_referrals table — populated by the bot's /start webhook when the
         // user clicked a referral link before the mini app auto-opened.

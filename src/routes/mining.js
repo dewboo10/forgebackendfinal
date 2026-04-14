@@ -232,56 +232,34 @@ export default async function miningRoutes(app) {
       return reply.code(400).send({ error: 'Invalid boost type' })
     }
 
-    const COOLDOWNS = {
-      surge: 4 * 60 * 60 * 1000,   // 4 hours in ms
-      turbo: 6 * 60 * 60 * 1000,   // 6 hours in ms
-    }
-
-    const col      = boostType === 'surge' ? 'surge_used_at' : 'turbo_used_at'
-    const chargeCol = boostType === 'surge' ? 'boost_charges' : 'turbo_charges'
-    const cooldownMs = COOLDOWNS[boostType]
+    const chargeCol   = boostType === 'surge' ? 'boost_charges' : 'turbo_charges'
+    const boostLabel  = boostType === 'surge' ? '3x_surge'     : '5x_turbo'
+    const boostSecs   = boostType === 'surge' ? 60             : 90
 
     return await db.tx(async (client) => {
-      // Lock the row so concurrent requests can't double-spend a charge
+      // Lock row to prevent double-spending a charge on concurrent taps
       const { rows } = await client.query(
         'SELECT * FROM users WHERE id=$1 FOR UPDATE',
         [req.user.id]
       )
       const user = rows[0]
-
-      const usedAt = user[col]
       const charges = user[chargeCol] || 0
-      const cooldownPassed = !usedAt || (Date.now() - new Date(usedAt).getTime() >= cooldownMs)
 
-      // Block only if BOTH: cooldown hasn't passed AND no paid charges.
-      // Paid charges (bought with Stars) always bypass the cooldown — the cooldown
-      // only governs the free charge that replenishes automatically every 4/6h.
-      if (!cooldownPassed && charges <= 0) {
-        const elapsed = Date.now() - new Date(usedAt).getTime()
-        return reply.code(429).send({
-          error:       'Cooldown active',
-          remainingMs: cooldownMs - elapsed,
-          usedAt:      new Date(usedAt).getTime(),
-        })
+      // No cooldown — purely charge-based. Users get 1 free on signup, buy more with Stars.
+      if (charges <= 0) {
+        return reply.code(400).send({ error: 'No charges available', needsBuy: true })
       }
 
-      // Activate boost — if using the free cooldown charge don't decrement the column
-      const boostLabel    = boostType === 'surge' ? '3x_surge' : '5x_turbo'
-      const boostDuration = boostType === 'surge' ? 60 : 90   // seconds
-      const newCharges    = cooldownPassed ? charges : charges - 1
+      const newCharges = charges - 1
       await client.query(
         `UPDATE users
-         SET ${col}=NOW(), ${chargeCol}=$2,
+         SET ${chargeCol}=$2,
              boost_active=$3, boost_until=NOW() + ($4 || ' seconds')::interval
          WHERE id=$1`,
-        [req.user.id, newCharges, boostLabel, boostDuration]
+        [req.user.id, newCharges, boostLabel, boostSecs]
       )
 
-      return reply.send({
-        ok:          true,
-        activatedAt: Date.now(),
-        chargesLeft: newCharges,
-      })
+      return reply.send({ ok: true, activatedAt: Date.now(), chargesLeft: newCharges })
     })
   })
 }
