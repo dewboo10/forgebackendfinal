@@ -111,14 +111,26 @@ export default async function storeRoutes(app) {
       console.log('Verify TON purchase request:', { userId: req.user.id, itemId, priceTON: item.priceTON })
     }
 
-    // Check not already purchased (for non-consumables)
-    if (item.type !== 'boost' && item.type !== 'chest') {
+    // Block re-purchase only for truly permanent items, or time-based items still active
+    if (item.type === 'perm' || item.type === 'ref_amp' || (item.type === 'automine' && item.days === null)) {
+      // Permanent — block if ever purchased
       const { rows } = await db.query(
         'SELECT id FROM purchases WHERE user_id=$1 AND item_id=$2 AND verified_at IS NOT NULL',
         [req.user.id, itemId]
       )
       if (rows.length > 0) return reply.code(400).send({ error: 'Already owned' })
+    } else if (item.type === 'automine') {
+      // Time-based automine — block only if still active
+      const { rows: uRows } = await db.query('SELECT automine_until, automine_lifetime FROM users WHERE id=$1', [req.user.id])
+      const u = uRows[0]
+      if (u.automine_lifetime) return reply.code(400).send({ error: 'Already owned' })
+      if (u.automine_until && new Date(u.automine_until) > new Date()) {
+        const daysLeft = Math.ceil((new Date(u.automine_until) - Date.now()) / (1000 * 60 * 60 * 24))
+        return reply.code(400).send({ error: 'Automine still active', daysLeft })
+      }
+      // Expired — allow re-purchase (fall through)
     }
+    // boost, chest, speed — always allow (consumable or stackable)
 
     // Verify TON transaction via TonAPI
     try {
@@ -211,8 +223,7 @@ export default async function storeRoutes(app) {
       if (item) {
         await db.tx(async (client) => {
           await client.query(
-            `INSERT INTO purchases (user_id, item_id, price_stars, verified_at) VALUES ($1,$2,$3,NOW())
-             ON CONFLICT DO NOTHING`,
+            `INSERT INTO purchases (user_id, item_id, price_stars, verified_at) VALUES ($1,$2,$3,NOW())`,
             [userId, itemId, item.priceStars]
           )
           await activateItem(client, userId, itemId, item)
