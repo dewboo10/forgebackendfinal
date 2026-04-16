@@ -175,8 +175,10 @@ export function upgradeCost(upgrade, currentLevel) {
 // ─── Pay referral commission ──────────────────────────────────────────────────
 export async function payReferralCommission(client, earnedFrg, referrerId, pct) {
   if (!referrerId || earnedFrg <= 0) return
-  // Apply referrer's amp multiplier (from ref_2x / ref_5x purchase) — default 1.0
-  const { rows } = await client.query('SELECT ref_amp_mult FROM users WHERE id=$1', [referrerId])
+  // Use SELECT * so this never throws if ref_amp_mult column hasn't been migrated yet.
+  // Explicitly selecting a column that doesn't exist throws a Postgres error which
+  // rolls back the entire heartbeat transaction, causing referred users to earn nothing.
+  const { rows } = await client.query('SELECT * FROM users WHERE id=$1', [referrerId])
   // If referrer was deleted, rows is empty — skip silently rather than crediting nobody
   if (!rows.length) return
   const ampMult = parseFloat(rows[0].ref_amp_mult || 1)
