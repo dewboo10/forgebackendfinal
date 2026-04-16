@@ -177,7 +177,9 @@ export async function payReferralCommission(client, earnedFrg, referrerId, pct) 
   if (!referrerId || earnedFrg <= 0) return
   // Apply referrer's amp multiplier (from ref_2x / ref_5x purchase) — default 1.0
   const { rows } = await client.query('SELECT ref_amp_mult FROM users WHERE id=$1', [referrerId])
-  const ampMult = parseFloat(rows[0]?.ref_amp_mult || 1)
+  // If referrer was deleted, rows is empty — skip silently rather than crediting nobody
+  if (!rows.length) return
+  const ampMult = parseFloat(rows[0].ref_amp_mult || 1)
   const commission = Math.floor(earnedFrg * pct * ampMult * 10000)
   if (commission <= 0) return
   await client.query(
