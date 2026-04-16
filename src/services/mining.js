@@ -186,6 +186,23 @@ export async function payReferralCommission(client, earnedFrg, referrerId, pct) 
   )
 }
 
+// ─── Calculate total FRG spent on upgrades from user_upgrades levels ──────────
+// Used by getMiningState so the frontend can show the correct "Upgrades & boosts"
+// figure instead of the broken reverse-engineering formula (total_mined - balance)
+// which breaks whenever balance contains daily/wallet/tier bonus credits.
+export function calcUpgradeSpend(upgradeLevels) {
+  let total = 0
+  for (const [upgradeId, level] of Object.entries(upgradeLevels)) {
+    const upgrade = UPGRADES.find(u => u.id === parseInt(upgradeId))
+    if (upgrade) {
+      for (let l = 0; l < level; l++) {
+        total += upgradeCost(upgrade, l)
+      }
+    }
+  }
+  return total
+}
+
 // ─── Full mining state snapshot for a user ────────────────────────────────────
 // FIX: Renamed 'upgrade_levels' → 'upgrades' so the frontend key lookup
 // (state.upgrades) resolves correctly. Also added 'totalMined' camelCase alias
@@ -195,6 +212,7 @@ export async function getMiningState(user) {
   const upgradeLevels = await getUserUpgrades(user.id)
   const rate = await calcRate(user, upgradeLevels, halvingMult)
   const pending = await calcPendingEarnings(user, upgradeLevels, halvingMult)
+  const totalSpentUpgrades = calcUpgradeSpend(upgradeLevels)
   const hasAutomine = user.automine_lifetime ||
     (user.automine_until && new Date(user.automine_until) > new Date())
 
@@ -226,6 +244,10 @@ export async function getMiningState(user) {
     speed_boost_until: user.speed_boost_until || null,
     speed_boost_mult:  user.speed_boost_until && new Date(user.speed_boost_until) > new Date()
       ? (user.speed_boost_mult || 1) : 1,
+
+    // Actual FRG spent on upgrades, calculated from user_upgrades levels.
+    // Frontend uses this directly instead of the broken (total_mined - balance) formula.
+    total_spent_upgrades: totalSpentUpgrades,
 
     // Referral amp multiplier (2.0 or 5.0 if purchased, else 1.0)
     ref_amp_mult: parseFloat(user.ref_amp_mult || 1),
