@@ -56,8 +56,11 @@ app.get('/health', async () => ({ ok: true, ts: Date.now() }))
 // ─── ADMIN PANEL (static) ─────────────────────────────────────────────────────
 await app.register(fastifyStatic, {
   root: path.join(__dirname, '../admin'),
-  prefix: '/admin',
+  prefix: '/admin/',
 })
+
+// Redirect /admin → /admin/ so the browser loads index.html correctly
+app.get('/admin', (req, reply) => reply.redirect('/admin/'))
 
 // ─── ROUTES ───────────────────────────────────────────────────────────────────
 await app.register(authRoutes)
