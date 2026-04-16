@@ -120,14 +120,20 @@ export default async function authRoutes(app) {
             )
             const bonusStr = await getConfig('referral_bonus_frg')
             const bonus = parseInt(bonusStr || '5000')
+            // Referee gets the join bonus
             await client.query(
               'UPDATE users SET balance=balance+$2 WHERE id=$1',
               [user.id, bonus * 10000]
             )
+            // Referrer ALSO gets the same instant bonus for bringing in a new user
+            await client.query(
+              'UPDATE users SET balance=balance+$2 WHERE id=$1',
+              [referrerId, bonus * 10000]
+            )
             await client.query(
               `INSERT INTO notifications (user_id, type, title, body)
                VALUES ($1,'referral','New recruit joined!',$2)`,
-              [referrerId, `${tgUser.first_name} joined using your link. +10% of all their mining goes to you.`]
+              [referrerId, `${tgUser.first_name} joined using your link. +${bonus.toLocaleString()} FRG bonus + 10% of all their mining goes to you.`]
             )
           } else {
             console.log(`[referral] code "${refCode}" not found in DB — no referral recorded`)
