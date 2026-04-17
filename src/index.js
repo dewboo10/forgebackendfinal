@@ -25,8 +25,23 @@ import { db } from './db/index.js'
 await db.query(`UPDATE config SET value='10' WHERE key='referral_percent' AND value='0.1'`)
 
 const app = Fastify({
+  // Keep Fastify's built-in logger off in prod (it's noisy JSON) — we use our own hooks below
   logger: process.env.NODE_ENV !== 'production',
   trustProxy: true,
+})
+
+// ─── REQUEST / RESPONSE LOGGING (Render-visible) ──────────────────────────────
+// Render captures all stdout. These hooks give us a clean request log even when
+// Fastify's JSON logger is disabled in production.
+app.addHook('onRequest', async (req) => {
+  if (req.url === '/health') return  // skip keepalive noise
+  const userId = req.headers['x-telegram-init-data']?.slice(0, 20) || 'unknown'
+  console.log(`[${new Date().toISOString()}] → ${req.method} ${req.url} (user:${userId}...)`)
+})
+
+app.addHook('onResponse', async (req, reply) => {
+  if (req.url === '/health') return
+  console.log(`[${new Date().toISOString()}] ← ${req.method} ${req.url} ${reply.statusCode}`)
 })
 
 // ─── CORS ─────────────────────────────────────────────────────────────────────

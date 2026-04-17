@@ -35,12 +35,16 @@ export default async function miningRoutes(app) {
   app.post('/api/mining/start', { preHandler: telegramAuth }, async (req, reply) => {
     const user = req.user
 
-    if (user.mining_start) return reply.send({ ok: true, already: true })
+    if (user.mining_start) {
+      console.log(`[mining:start] user=${user.id} already mining since ${user.mining_start}`)
+      return reply.send({ ok: true, already: true })
+    }
 
     await db.query(
       `UPDATE users SET mining_start=NOW(), last_heartbeat=NOW() WHERE id=$1`,
       [user.id]
     )
+    console.log(`[mining:start] user=${user.id} session started`)
     return reply.send({ ok: true, mining_start: new Date() })
   })
 
@@ -56,6 +60,7 @@ export default async function miningRoutes(app) {
       const rate = await calcRate(user, upgrades, halvingMult)
       const boostMult = getBoostMult(user)
       const earned = await calcPendingEarnings(user, upgrades, halvingMult, boostMult)
+      console.log(`[mining:stop] user=${user.id} earned=${earned} rate=${rate} boost=${boostMult}`)
 
       return await db.tx(async (client) => {
         const result = await applyEarnings(client, user.id, earned, rate)
@@ -63,6 +68,7 @@ export default async function miningRoutes(app) {
           const refPct = parseFloat(await getConfig('referral_percent') || '0.1')
           await payReferralCommission(client, earned, user.referred_by, refPct)
         }
+        console.log(`[mining:stop] user=${user.id} new_balance=${result.balance}`)
         return reply.send({ ok: true, earned, ...result })
       })
     } catch (e) {
@@ -83,7 +89,9 @@ export default async function miningRoutes(app) {
       const user = rows[0]
 
       if (!user.mining_start) {
-        return reply.send({ ok: true })
+        // Session was killed (heartbeat cleanup or stop) — tell frontend to restart
+        console.log(`[heartbeat] user=${user.id} no active session, signaling frontend to restart`)
+        return reply.send({ ok: true, mining: false })
       }
 
       const halvingMult = await getHalvingMultiplier()
@@ -92,6 +100,7 @@ export default async function miningRoutes(app) {
       const boostMult = getBoostMult(user)
       const earned = await calcPendingEarnings(user, upgrades, halvingMult, boostMult)
 
+      console.log(`[heartbeat] user=${user.id} earned=${earned} rate=${rate}`)
       if (earned > 0) {
         const refPct = parseFloat(await getConfig('referral_percent') || '0.1')
         const result = await db.tx(async (client) => {
@@ -136,13 +145,17 @@ export default async function miningRoutes(app) {
     const hasAutomine = user.automine_lifetime ||
       (user.automine_until && new Date(user.automine_until) > new Date())
     if (!hasAutomine) return reply.code(403).send({ error: 'No automine active' })
-    if (!user.mining_start) return reply.send({ ok: true, earned: 0 })
+    if (!user.mining_start) {
+      console.log(`[claim-offline] user=${user.id} no session — nothing to claim`)
+      return reply.send({ ok: true, earned: 0 })
+    }
 
     const halvingMult = await getHalvingMultiplier()
     const upgrades = await getUserUpgrades(user.id)
     const rate = await calcRate(user, upgrades, halvingMult)
     const boostMult = getBoostMult(user)
     const earned = await calcPendingEarnings(user, upgrades, halvingMult, boostMult)
+    console.log(`[claim-offline] user=${user.id} earned=${earned} rate=${rate}`)
 
     return await db.tx(async (client) => {
       const result = await applyEarnings(client, user.id, earned, rate)
@@ -155,6 +168,7 @@ export default async function miningRoutes(app) {
         const refPct = parseFloat(await getConfig('referral_percent') || '0.1')
         await payReferralCommission(client, earned, user.referred_by, refPct)
       }
+      console.log(`[claim-offline] user=${user.id} new_balance=${result.balance}`)
       return reply.send({ ok: true, earned, ...result })
     })
   })
